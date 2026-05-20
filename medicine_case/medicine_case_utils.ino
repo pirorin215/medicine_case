@@ -1,0 +1,222 @@
+/**
+ * Notification and Utility Functions for Medicine Case
+ *
+ * - Schedule-based notification system
+ * - LED status indication
+ * - Logging utilities
+ */
+
+#include "medicine_case.h"
+
+// --- Notification Functions ---
+
+void checkNotifications() {
+    // Check if BLE notifications are enabled
+    if (!g_bleNotificationEnabled) {
+        logPrint("NOTIF", "BLE notifications disabled. Skipping check.");
+        return;
+    }
+
+    // Check if device is connected
+    if (!g_deviceConnected) {
+        logPrint("NOTIF", "Device not connected. Skipping notification.");
+        return;
+    }
+
+    // Check daily notification limit
+    if (g_dailyNotificationCount >= MAX_NOTIFICATIONS_PER_DAY) {
+        logPrint("NOTIF", "Daily notification limit reached. Skipping check.");
+        return;
+    }
+
+    int currentHour = getHours();
+    int currentMinute = getMinutes();
+
+    // Check each schedule
+    for (int i = 0; i < MAX_SCHEDULES; i++) {
+        if (!g_schedules[i].enabled) continue;
+        if (g_schedules[i].taken) continue;  // Already taken
+
+        // Calculate time difference
+        int scheduleHour = g_schedules[i].hour;
+        int scheduleMinute = g_schedules[i].minute;
+
+        // Convert to minutes since midnight
+        int currentMinutes = currentHour * 60 + currentMinute;
+        int scheduleMinutes = scheduleHour * 60 + scheduleMinute;
+
+        // Check if scheduled time has passed
+        if (currentMinutes >= scheduleMinutes) {
+            // Check if we should notify (hourly check)
+            int hoursPast = (currentMinutes - scheduleMinutes) / 60;
+
+            if (hoursPast >= 1) {
+                const char* scheduleName = (i == 0) ? "Morning" :
+                                          (i == 1) ? "Afternoon" : "Evening";
+
+                logPrint("NOTIF", "Sending notification for %s medicine (past by %d hours)",
+                         scheduleName, hoursPast);
+
+                sendIntakeNotification(i);
+                g_dailyNotificationCount++;
+            }
+        }
+    }
+}
+
+// --- LED Functions ---
+
+void setupLed() {
+    logPrint("LED", "Initializing onboard LED...");
+
+    // Initialize XIAO BLE Sense RGB LED pins (CORRECT PINOUT)
+    // Red = D11, Green = D13, Blue = D12 (active low)
+    pinMode(11, OUTPUT);  // LED_RED
+    pinMode(13, OUTPUT);  // LED_GREEN
+    pinMode(12, OUTPUT);  // LED_BLUE
+
+    // Turn off all LEDs initially
+    digitalWrite(11, HIGH);  // Red OFF
+    digitalWrite(13, HIGH);  // Green OFF
+    digitalWrite(12, HIGH);  // Blue OFF
+
+    logPrint("LED", "✅ RGB LED initialized (R=11, G=13, B=12)");
+}
+
+void updateLed() {
+    // 点滅をやめて、点灯のみにする
+    switch (g_currentLedState) {
+        case LED_STATE_BOOT:
+            // Solid purple during boot (Red + Blue)
+            setLedColor(true, false, true);
+            break;
+
+        case LED_STATE_NO_SYNC:
+            // Solid red - Not connected (changed from blinking)
+            setLedColor(true, false, false);
+            break;
+
+        case LED_STATE_SYNCED:
+            // Solid green - Synced but not connected
+            setLedColor(false, true, false);
+            break;
+
+        case LED_STATE_CONNECTED_NO_SYNC:
+            // Solid yellow - Connected but not synced (changed from blinking)
+            setLedColor(true, true, false);  // Red + Green = Yellow
+            break;
+
+        case LED_STATE_CONNECTED_SYNCED:
+            // Solid green - Connected and synced (ready to detect)
+            setLedColor(false, true, false);
+            break;
+
+        case LED_STATE_ERROR:
+            // Red rapid blinking (only error state keeps blinking)
+            static unsigned long lastLedUpdate = 0;
+            static bool ledState = false;
+            if (g_currentMillis - lastLedUpdate >= 200) {
+                ledState = !ledState;
+                setLedColor(ledState, false, false);
+                lastLedUpdate = g_currentMillis;
+            }
+            break;
+    }
+}
+
+void setLedState(LedState state) {
+    g_currentLedState = state;
+}
+
+void setLedColor(bool red, bool green, bool blue) {
+    // XIAO BLE Sense onboard LED is active low
+    // Red = D11, Green = D13, Blue = D12 (DISABLED - INPUT mode)
+    pinMode(11, OUTPUT);  // LED_RED
+    pinMode(13, OUTPUT);  // LED_GREEN
+    // pinMode(12, INPUT);  // LED_BLUE disabled (INPUT mode)
+
+    digitalWrite(11, red ? LOW : HIGH);   // Red
+    digitalWrite(13, green ? LOW : HIGH); // Green
+    // digitalWrite(12, blue ? LOW : HIGH); // Blue disabled
+}
+
+void setLedError() {
+    setLedState(LED_STATE_ERROR);
+    logPrint("LED", "Error state set");
+}
+
+void updateLedStateBasedOnStatus() {
+    if (g_deviceConnected) {
+        if (g_timeSynced) {
+            setLedState(LED_STATE_CONNECTED_SYNCED);
+        } else {
+            setLedState(LED_STATE_CONNECTED_NO_SYNC);
+        }
+    } else {
+        if (g_timeSynced) {
+            setLedState(LED_STATE_SYNCED);
+        } else {
+            setLedState(LED_STATE_NO_SYNC);
+        }
+    }
+}
+
+// --- Logging Functions ---
+
+void setupLog() {
+    // Serial buffer configuration not available on this platform
+    // Serial.setTxBufferSize(2048);
+    // Serial.setRxBufferSize(2048);
+
+    // シリアルポートが確実に初期化されるのを待つ
+    delay(500);
+
+    // テストメッセージを送信
+    Serial.println();
+    Serial.println("========================================");
+    Serial.println("Medicine Case v1.0.1");
+    Serial.println("✅ Serial port ready (115200 baud)");
+    Serial.println("✅ Logging system initialized");
+    Serial.println("========================================");
+    Serial.println();
+
+    logPrint("LOG", "📡 Serial communication started");
+}
+
+void logPrint(const char* tag, const char* format, ...) {
+    char buffer[256];
+    va_list args;
+
+    // Calculate timestamp since boot
+    unsigned long seconds = (g_currentMillis - g_startupMillis) / 1000;
+    unsigned long milliseconds = (g_currentMillis - g_startupMillis) % 1000;
+
+    // Format header
+    int headerLen = snprintf(buffer, sizeof(buffer), "[%06lu.%03lu]", seconds, milliseconds);
+
+    // Add tag if provided
+    if (tag[0] != '\0') {
+        headerLen += snprintf(buffer + headerLen, sizeof(buffer) - headerLen, "[%s] ", tag);
+    }
+
+    // Add formatted message
+    va_start(args, format);
+    vsnprintf(buffer + headerLen, sizeof(buffer) - headerLen, format, args);
+    va_end(args);
+
+    // Print to serial and flush immediately
+    Serial.println(buffer);
+    Serial.flush();
+}
+
+void logPrintRaw(const char* format, ...) {
+    va_list args;
+    char buffer[256];
+
+    va_start(args, format);
+    vsnprintf(buffer, sizeof(buffer), format, args);
+    va_end(args);
+
+    Serial.println(buffer);
+    Serial.flush();
+}
