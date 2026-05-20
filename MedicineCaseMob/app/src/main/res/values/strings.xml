@@ -1,0 +1,23 @@
+<resources>
+    <string name="app_name">Medicine Case</string>
+    <string name="morning">朝</string>
+    <string name="afternoon">昼</string>
+    <string name="evening">夜</string>
+    <string name="taken">服用済</string>
+    <string name="not_taken">未服用</string>
+    <string name="schedule_settings">スケジュール設定</string>
+    <string name="notification_settings">通知設定</string>
+    <string name="history">履歴</string>
+    <string name="settings">設定</string>
+    <string name="connect">接続</string>
+    <string name="disconnect">切断</string>
+    <string name="connecting">接続中…</string>
+    <string name="connected">接続済</string>
+    <string name="disconnected">未接続</string>
+    <string name="enable_bluetooth">Bluetoothをオンにしてください</string>
+    <string name="notification_enabled">通知オン</string>
+    <string name="notification_disabled">通知オフ</string>
+    <string name="only_when_connected">接続時のみ通知</string>
+    <string name="save">保存</string>
+    <string name="cancel">キャンセル</string>
+</resources>

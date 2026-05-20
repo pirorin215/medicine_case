@@ -1,15 +1,16 @@
 /**
  * Medicine Case - XIAO BLE Sense based medicine case reminder
  *
- * Features:
- * - BLE time synchronization with smartphone
- * - 6-axis sensor (LSM6DS3TRC) for medicine intake detection
- * - Medicine intake notification (morning, afternoon, evening)
- * - Schedule-based notification system
- * - Always powered via USB
+ * Architecture (v1.1.0):
+ * - Firmware: intake detection only (no schedule management)
+ * - App: schedule management, notifications, history
+ *
+ * Firmware role:
+ * - Detect medicine intake via 6-axis sensor
+ * - Store single intake timestamp for app to retrieve
+ * - BLE communication for time sync and detection settings
  */
 
-#include <Adafruit_TinyUSB.h>
 #include "medicine_case.h"
 
 // --- Global Variables ---
@@ -19,7 +20,9 @@ LedState g_currentLedState = LED_STATE_BOOT;
 unsigned long g_currentMillis = 0;
 unsigned long g_startupMillis = 0;
 bool g_timeSynced = false;
-bool g_bleNotificationEnabled = true;  // Default: enabled
+
+// Last intake timestamp (0 = no pending intake)
+uint32_t g_lastIntakeTimestamp = 0;
 
 // Sensor
 LSM6DS3* g_lsm6ds3 = nullptr;
@@ -30,17 +33,9 @@ float g_stableRoll = 0.0f;
 IntakeDetectionState g_detectionState = DETECTION_STATE_IDLE;
 unsigned long g_movementStartTime = 0;
 
-// Medicine schedules (Morning, Afternoon, Evening)
-MedicineSchedule g_schedules[MAX_SCHEDULES] = {
-    {true, 7, 0, 0, 0},    // Morning: 7:00 AM
-    {true, 12, 0, 0, 0},   // Afternoon: 12:00 PM
-    {true, 19, 0, 0, 0}    // Evening: 7:00 PM
-};
-
-// Notification tracking
-uint32_t g_lastNotificationCheck = 0;
-uint8_t g_dailyNotificationCount = 0;
-uint32_t g_lastNotificationDay = 0;
+// Detection settings (configurable via BLE)
+float g_movementThreshold = DEFAULT_MOVEMENT_THRESHOLD_DEG;
+unsigned long g_cooldownTime = DEFAULT_COOLDOWN_TIME_MS;
 
 // Time management
 unsigned long g_lastCounterMillis = 0;
@@ -68,11 +63,6 @@ void updateTimestamp() {
     }
 }
 
-// Get current day (for daily notification reset)
-uint32_t getCurrentDay() {
-    return g_currentTimestamp / 86400;
-}
-
 // --- Settings Management ---
 
 void loadSettings() {
@@ -81,21 +71,20 @@ void loadSettings() {
 
     File file(InternalFS);
 
-    if (file.open("/settings.dat", FILE_O_READ)) {
-        // Load schedules
-        if (file.read((uint8_t*)g_schedules, sizeof(g_schedules)) == sizeof(g_schedules)) {
-            for (int i = 0; i < MAX_SCHEDULES; i++) {
-                const char* scheduleName = (i == 0) ? "Morning" : (i == 1) ? "Afternoon" : "Evening";
-                logPrint("MEDICINE_CASE", "  %s: %s %02d:%02d (taken=%d)",
-                         scheduleName,
-                         g_schedules[i].enabled ? "enabled" : "disabled",
-                         g_schedules[i].hour,
-                         g_schedules[i].minute,
-                         g_schedules[i].taken);
-            }
-            logPrint("MEDICINE_CASE", "Settings loaded successfully.");
+    // Load detection settings only
+    if (file.open("/detection.dat", FILE_O_READ)) {
+        float threshold;
+        unsigned long cooldown;
+        if (file.read((uint8_t*)&threshold, sizeof(threshold)) == sizeof(threshold)) {
+            g_movementThreshold = threshold;
+            logPrint("MEDICINE_CASE", "  Movement threshold: %.1f degrees", g_movementThreshold);
+        }
+        if (file.read((uint8_t*)&cooldown, sizeof(cooldown)) == sizeof(cooldown)) {
+            g_cooldownTime = cooldown;
+            logPrint("MEDICINE_CASE", "  Cooldown time: %lu ms", g_cooldownTime);
         }
         file.close();
+        logPrint("MEDICINE_CASE", "Settings loaded successfully.");
     } else {
         logPrint("MEDICINE_CASE", "No settings file found. Using defaults.");
     }
@@ -104,80 +93,81 @@ void loadSettings() {
 
 void saveSettings() {
     logPrint("MEDICINE_CASE", "Saving settings to InternalFS...");
-    InternalFS.remove("/settings.dat");
+
+    // Save detection settings only
+    InternalFS.remove("/detection.dat");
     File file(InternalFS);
 
-    if (file.open("/settings.dat", FILE_O_WRITE)) {
-        file.write((uint8_t*)g_schedules, sizeof(g_schedules));
+    if (file.open("/detection.dat", FILE_O_WRITE)) {
+        file.write((uint8_t*)&g_movementThreshold, sizeof(g_movementThreshold));
+        file.write((uint8_t*)&g_cooldownTime, sizeof(g_cooldownTime));
         file.close();
-        logPrint("MEDICINE_CASE", "Settings saved successfully.");
+        logPrint("MEDICINE_CASE", "Detection settings saved: threshold=%.1f deg, cooldown=%lu ms",
+                 g_movementThreshold, g_cooldownTime);
     } else {
-        logPrint("MEDICINE_CASE", "Failed to open settings file for writing.");
+        logPrint("MEDICINE_CASE", "Failed to open detection settings file for writing.");
     }
+
     Serial.flush();
 }
 
 // --- BLE Command Handlers ---
 
-void handleScheduleConfig(const char* command) {
-    // Format: SET:schedule:index:enabled:hour:minute
-    // Example: SET:schedule:0:1:7:0 (Morning schedule, enabled, 7:00 AM)
-    const char* p = command + strlen("SET:schedule:");
+void handleDetectionConfig(const char* command) {
+    // Format: SET:detection:type:value
+    // Examples:
+    //   SET:detection:angle:70.0  (Set movement threshold to 70 degrees)
+    //   SET:detection:cooldown:30000  (Set cooldown to 30000ms)
 
-    int index = atoi(p);
-    p = strchr(p, ':') + 1;
+    const char* typeStart = command + strlen("SET:detection:");
 
-    int enabled = atoi(p);
-    p = strchr(p, ':') + 1;
+    // Check detection type
+    if (strncmp(typeStart, "angle:", 6) == 0) {
+        // Set movement threshold
+        const char* valueStr = typeStart + 6;
+        float value = atof(valueStr);
 
-    int hour = atoi(p);
-    p = strchr(p, ':') + 1;
+        if (value >= 10.0f && value <= 180.0f) {
+            g_movementThreshold = value;
+            logPrint("MEDICINE_CASE", "Movement threshold set to %.1f degrees", g_movementThreshold);
+            saveSettings();
+            sendResponse("OK: Detection angle updated");
+        } else {
+            logPrint("MEDICINE_CASE", "Invalid angle value: %.1f (valid range: 10-180)", value);
+            sendResponse("ERROR: Invalid angle value (valid range: 10-180)");
+        }
 
-    int minute = atoi(p);
+    } else if (strncmp(typeStart, "cooldown:", 8) == 0) {
+        // Set cooldown time
+        const char* valueStr = typeStart + 8;
+        unsigned long value = (unsigned long)atol(valueStr);
 
-    if (index >= 0 && index < MAX_SCHEDULES) {
-        g_schedules[index].enabled = (enabled != 0);
-        g_schedules[index].hour = (int8_t)hour;
-        g_schedules[index].minute = (int8_t)minute;
+        if (value >= 1000 && value <= 300000) {  // 1 second to 5 minutes
+            g_cooldownTime = value;
+            logPrint("MEDICINE_CASE", "Cooldown time set to %lu ms (%.1f seconds)",
+                     g_cooldownTime, g_cooldownTime / 1000.0f);
+            saveSettings();
+            sendResponse("OK: Detection cooldown updated");
+        } else {
+            logPrint("MEDICINE_CASE", "Invalid cooldown value: %lu (valid range: 1000-300000)", value);
+            sendResponse("ERROR: Invalid cooldown value (valid range: 1000-300000)");
+        }
 
-        const char* scheduleName = (index == 0) ? "Morning" : (index == 1) ? "Afternoon" : "Evening";
-        logPrint("MEDICINE_CASE", "%s schedule updated: %s %02d:%02d",
-                 scheduleName,
-                 g_schedules[index].enabled ? "enabled" : "disabled",
-                 g_schedules[index].hour,
-                 g_schedules[index].minute);
-
-        saveSettings();
-        sendResponse("OK: Schedule updated");
     } else {
-        logPrint("MEDICINE_CASE", "Invalid schedule index: %d", index);
-        sendResponse("ERROR: Invalid schedule index");
+        logPrint("MEDICINE_CASE", "Unknown detection config type: %s", typeStart);
+        sendResponse("ERROR: Unknown detection config type");
     }
-}
-
-void handleNotificationConfig(const char* command) {
-    // Format: SET:notification:enabled
-    // Example: SET:notification:1 (Enable notifications)
-    const char* enabledStr = command + strlen("SET:notification:");
-    int enabled = atoi(enabledStr);
-
-    g_bleNotificationEnabled = (enabled != 0);
-
-    logPrint("MEDICINE_CASE", "BLE notification %s", g_bleNotificationEnabled ? "enabled" : "disabled");
-    saveSettings();
-    sendResponse("OK: Notification config updated");
 }
 
 void handleGetStatus() {
     logPrint("MEDICINE_CASE", "Processing GET:status command");
 
-    // Build status response
-    char statusResponse[256];
+    char statusResponse[128];
     snprintf(statusResponse, sizeof(statusResponse),
-             "OK:status:%d,%d,%d,%d,%d,%d,%d,%d,%d",
-             g_schedules[0].enabled, g_schedules[0].hour, g_schedules[0].minute, g_schedules[0].taken,
-             g_schedules[1].enabled, g_schedules[1].hour, g_schedules[1].minute, g_schedules[1].taken,
-             g_schedules[2].enabled, g_schedules[2].hour, g_schedules[2].minute, g_schedules[2].taken);
+             "OK:status:connected=%d,synced=%d,pending_intake=%lu",
+             g_deviceConnected ? 1 : 0,
+             g_timeSynced ? 1 : 0,
+             g_lastIntakeTimestamp);
 
     sendResponse(statusResponse);
     logPrint("MEDICINE_CASE", "Status response sent");
@@ -195,81 +185,75 @@ void handleGetVersion() {
              FIRMWARE_VERSION_MAJOR, FIRMWARE_VERSION_MINOR, FIRMWARE_VERSION_PATCH);
 }
 
+void handleGetIntake() {
+    logPrint("MEDICINE_CASE", "Processing GET:intake command");
+
+    if (g_lastIntakeTimestamp > 0) {
+        char response[64];
+        snprintf(response, sizeof(response), "INTAKE:%lu", g_lastIntakeTimestamp);
+        sendResponse(response);
+        logPrint("MEDICINE_CASE", "Intake timestamp sent: %lu", g_lastIntakeTimestamp);
+    } else {
+        sendResponse("NONE");
+        logPrint("MEDICINE_CASE", "No pending intake");
+    }
+}
+
+void handleClearIntake() {
+    logPrint("MEDICINE_CASE", "Processing CLR:intake command");
+    g_lastIntakeTimestamp = 0;
+    sendResponse("OK: Intake cleared");
+    logPrint("MEDICINE_CASE", "Intake timestamp cleared");
+}
+
 // --- Main Functions ---
 
 void setup() {
-    // TinyUSB Serial初期化（Blinkプロジェクト成功パターン）
     Serial.begin(115200);
-    while (!Serial) {
-        delay(10);  // Serial接続を待つ
+    unsigned long startTime = millis();
+    while (!Serial && (millis() - startTime < 5000)) {
+       delay(10);
     }
 
     Serial.println("========================================");
-    Serial.println("Medicine Case v1.0.6 - TinyUSB Serial");
+    Serial.println("Medicine Case v1.1.0");
     Serial.println("========================================");
     Serial.flush();
 
     g_startupMillis = millis();
 
-    // LED初期化
     setupLed();
-
     Serial.println("LED: INITIALIZED");
     Serial.flush();
 
-    // センサー初期化
-    Serial.println("SENSOR: INITIALIZING...");
     setupSensor();
     Serial.println("SENSOR: OK");
     Serial.flush();
 
-    // BLE初期化
-    Serial.println("BLE: INITIALIZING...");
     setupBLE();
     Serial.println("BLE: OK");
     Serial.flush();
 
-    // BLEライブラリによるLED制御を上書きする
-    // BLE初期化後に再度LEDを設定する
-    Serial.println("LED: Re-initializing after BLE...");
-    Serial.flush();
-
-    // まず青色LED（D12）を消す
+    // Disable BLE library's LED control
     digitalWrite(12, HIGH);  // Blue OFF
-
-    // 青色LED（D12）を入力モードにして、BLEライブラリからの制御を無効化
-    pinMode(12, INPUT);
-
-    // 赤（D11）と緑（D13）は出力モードのまま（制御可能）
-    pinMode(11, OUTPUT);  // LED_RED
-    pinMode(13, OUTPUT);  // LED_GREEN
-
-    // 赤と緑を消す
+    pinMode(12, INPUT);      // Blue LED disabled
+    pinMode(11, OUTPUT);     // LED_RED
+    pinMode(13, OUTPUT);     // LED_GREEN
     digitalWrite(11, HIGH);  // Red OFF
     digitalWrite(13, HIGH);  // Green OFF
-
-    Serial.println("LED: Blue LED (D12) disabled (INPUT mode)");
-    Serial.println("LED: Red (D11) and Green (D13) ready for control");
+    Serial.println("LED: Blue LED disabled, Red/Green ready");
     Serial.flush();
 
     delay(100);
 
-    Serial.println("LED: Re-initialization complete");
-    Serial.flush();
-
-    // 設定読み込み
     loadSettings();
-
     g_lastCounterMillis = millis();
-    g_lastNotificationCheck = g_currentTimestamp;
-    g_lastNotificationDay = getCurrentDay();
 
     Serial.println("========================================");
     Serial.println("SYSTEM: READY");
     Serial.println("========================================");
     Serial.flush();
 
-    // 未接続状態のLED設定
     setLedState(LED_STATE_NO_SYNC);
 
     Serial.println("LOOP: STARTING");
@@ -277,7 +261,6 @@ void setup() {
 }
 
 void loop() {
-    // Get current time once for this loop iteration
     g_currentMillis = millis();
 
     // Update timestamp
@@ -286,36 +269,13 @@ void loop() {
     // Update sensor
     updateSensor();
 
-    // Check for medicine intake
+    // Detect medicine intake
     detectMedicineIntake();
-
-    // Check notifications (every minute)
-    if (g_currentTimestamp - g_lastNotificationCheck >= 60) {
-        checkNotifications();
-        g_lastNotificationCheck = g_currentTimestamp;
-
-        // Reset daily notification count if day changed
-        uint32_t currentDay = getCurrentDay();
-        if (currentDay != g_lastNotificationDay) {
-            g_dailyNotificationCount = 0;
-            g_lastNotificationDay = currentDay;
-
-            // Reset "taken" status for new day
-            for (int i = 0; i < MAX_SCHEDULES; i++) {
-                g_schedules[i].taken = 0;
-                g_schedules[i].takenTimestamp = 0;
-            }
-            saveSettings();
-
-            Serial.println("MEDICINE_CASE: New day - Reset status");
-            Serial.flush();
-        }
-    }
 
     // Update LED
     updateLed();
 
-    // 定期的なシステム状態ログ出力（5秒ごと）
+    // Periodic system log (every 5 seconds)
     static unsigned long lastSystemLogTime = 0;
     if (g_currentMillis - lastSystemLogTime >= 5000) {
         Serial.print("SYSTEM: Time=");
@@ -323,7 +283,9 @@ void loop() {
         Serial.print(", Connected=");
         Serial.print(g_deviceConnected);
         Serial.print(", Synced=");
-        Serial.println(g_timeSynced);
+        Serial.print(g_timeSynced);
+        Serial.print(", PendingIntake=");
+        Serial.println(g_lastIntakeTimestamp);
         Serial.flush();
         lastSystemLogTime = g_currentMillis;
     }

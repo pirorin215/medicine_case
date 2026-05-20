@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Medicine Pill/Capsule -->
+    <path
+        android:fillColor="@color/primary"
+        android:pathData="M 4.5 8 L 19.5 8 A 2 2 0 0 1 19.5 16 L 4.5 16 A 2 2 0 0 1 4.5 8 Z" />
+    <!-- Division Line -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M 12 8 L 12 16" />
+    <!-- Top Half (Morning) -->
+    <path
+        android:fillColor="#4CAF50"
+        android:pathData="M 12 8 L 12 12 A 4 4 0 0 1 12 8" />
+    <!-- Bottom Half (Evening) -->
+    <path
+        android:fillColor="#FF9800"
+        android:pathData="M 12 12 L 12 16 A 4 4 0 0 0 12 12" />
+</vector>

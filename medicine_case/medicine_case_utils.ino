@@ -1,68 +1,11 @@
 /**
- * Notification and Utility Functions for Medicine Case
+ * Utility Functions for Medicine Case
  *
- * - Schedule-based notification system
  * - LED status indication
  * - Logging utilities
  */
 
 #include "medicine_case.h"
-
-// --- Notification Functions ---
-
-void checkNotifications() {
-    // Check if BLE notifications are enabled
-    if (!g_bleNotificationEnabled) {
-        logPrint("NOTIF", "BLE notifications disabled. Skipping check.");
-        return;
-    }
-
-    // Check if device is connected
-    if (!g_deviceConnected) {
-        logPrint("NOTIF", "Device not connected. Skipping notification.");
-        return;
-    }
-
-    // Check daily notification limit
-    if (g_dailyNotificationCount >= MAX_NOTIFICATIONS_PER_DAY) {
-        logPrint("NOTIF", "Daily notification limit reached. Skipping check.");
-        return;
-    }
-
-    int currentHour = getHours();
-    int currentMinute = getMinutes();
-
-    // Check each schedule
-    for (int i = 0; i < MAX_SCHEDULES; i++) {
-        if (!g_schedules[i].enabled) continue;
-        if (g_schedules[i].taken) continue;  // Already taken
-
-        // Calculate time difference
-        int scheduleHour = g_schedules[i].hour;
-        int scheduleMinute = g_schedules[i].minute;
-
-        // Convert to minutes since midnight
-        int currentMinutes = currentHour * 60 + currentMinute;
-        int scheduleMinutes = scheduleHour * 60 + scheduleMinute;
-
-        // Check if scheduled time has passed
-        if (currentMinutes >= scheduleMinutes) {
-            // Check if we should notify (hourly check)
-            int hoursPast = (currentMinutes - scheduleMinutes) / 60;
-
-            if (hoursPast >= 1) {
-                const char* scheduleName = (i == 0) ? "Morning" :
-                                          (i == 1) ? "Afternoon" : "Evening";
-
-                logPrint("NOTIF", "Sending notification for %s medicine (past by %d hours)",
-                         scheduleName, hoursPast);
-
-                sendIntakeNotification(i);
-                g_dailyNotificationCount++;
-            }
-        }
-    }
-}
 
 // --- LED Functions ---
 
