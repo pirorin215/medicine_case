@@ -1,10 +1,13 @@
 package com.pirorin215.medicinecasemob.ui.screen
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -15,31 +18,46 @@ import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.BluetoothDisabled
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalInspectionMode
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.pirorin215.medicinecasemob.R
+import kotlinx.coroutines.launch
 import com.pirorin215.medicinecasemob.ble.BleManager
+import com.pirorin215.medicinecasemob.ui.components.AppLogCard
 import com.pirorin215.medicinecasemob.ui.data.MedicineIntakeRecord
+import com.pirorin215.medicinecasemob.ui.data.MedicineSchedule
 import com.pirorin215.medicinecasemob.ui.data.ScheduleType
 import com.pirorin215.medicinecasemob.ui.viewModel.MainViewModel
 import java.text.SimpleDateFormat
@@ -51,25 +69,51 @@ import java.util.Locale
 fun MainScreen(
     modifier: Modifier = Modifier,
     viewModel: MainViewModel = hiltViewModel(),
-    onNavigateToSettings: () -> Unit = {}
+    onNavigateToDetectionSettings: () -> Unit = {},
+    onNavigateToScheduleSettings: () -> Unit = {},
+    onNavigateToDebug: () -> Unit = {}
 ) {
+    val context = LocalContext.current
     val schedules by viewModel.schedules.collectAsState()
     val intakeRecords by viewModel.intakeRecords.collectAsState()
     val isConnected by viewModel.isConnected.collectAsState()
     val bleConnectionState by viewModel.bleConnectionState.collectAsState()
     val scanResults by viewModel.scanResults.collectAsState()
+    val isSelectMode by viewModel.isSelectMode.collectAsState()
+    val selectedRecordIds by viewModel.selectedRecordIds.collectAsState()
+    val appLogs by viewModel.appLogs.collectAsState()
 
     var showBleDialog by remember { mutableStateOf(false) }
-
-    android.util.Log.d("MainScreen", "Recomposing, showBleDialog = $showBleDialog")
+    var showDeleteSelectedDialog by remember { mutableStateOf(false) }
+    var showMenu by remember { mutableStateOf(false) }
+    var showAppLogsOverlay by remember { mutableStateOf(false) }
 
     if (showBleDialog) {
-        android.util.Log.d("MainScreen", "Showing BleConnectionDialog")
         BleConnectionDialog(
             viewModel = viewModel,
-            onDismiss = {
-                android.util.Log.d("MainScreen", "BleConnectionDialog onDismiss called")
-                showBleDialog = false
+            onDismiss = { showBleDialog = false }
+        )
+    }
+
+    if (showDeleteSelectedDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteSelectedDialog = false },
+            title = { Text("履歴を削除") },
+            text = { Text("選択した${selectedRecordIds.size}件の服薬履歴を削除しますか？") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deleteSelectedRecords()
+                        showDeleteSelectedDialog = false
+                    }
+                ) {
+                    Text("削除", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteSelectedDialog = false }) {
+                    Text("キャンセル")
+                }
             }
         )
     }
@@ -79,47 +123,158 @@ fun MainScreen(
             TopAppBar(
                 title = { Text("Medicine Case") },
                 actions = {
-                    // BLE接続状態表示
-                    IconButton(onClick = { showBleDialog = true }) {
-                        Icon(
-                            imageVector = if (isConnected) Icons.Default.Bluetooth else Icons.Default.BluetoothDisabled,
-                            contentDescription = "BLE接続状態",
-                            tint = if (isConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-                        )
-                    }
-                    IconButton(onClick = onNavigateToSettings) {
-                        Icon(Icons.Default.Settings, contentDescription = "設定")
+                    if (!isSelectMode) {
+                        IconButton(onClick = { showBleDialog = true }) {
+                            Icon(
+                                imageVector = if (isConnected) Icons.Default.Bluetooth else Icons.Default.BluetoothDisabled,
+                                contentDescription = "BLE接続状態",
+                                tint = if (isConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                            )
+                        }
+
+                        Box {
+                            IconButton(onClick = { showMenu = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.MoreVert,
+                                    contentDescription = "メニュー"
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = showMenu,
+                                onDismissRequest = { showMenu = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("マイコン設定") },
+                                    onClick = {
+                                        showMenu = false
+                                        onNavigateToDetectionSettings()
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("アプリ設定") },
+                                    onClick = {
+                                        showMenu = false
+                                        onNavigateToScheduleSettings()
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("マイコンデバッグ") },
+                                    onClick = {
+                                        showMenu = false
+                                        onNavigateToDebug()
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("アプリログ") },
+                                    onClick = {
+                                        showMenu = false
+                                        showAppLogsOverlay = !showAppLogsOverlay
+                                    }
+                                )
+                            }
+                        }
                     }
                 }
             )
         }
     ) { paddingValues ->
-        LazyColumn(
-            modifier = modifier
+        Box(
+            modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Today's status
-            item {
-                TodayStatusCard(
-                    schedules = schedules,
-                    todayRecord = viewModel.getTodayRecord()
-                )
+            LazyColumn(
+                modifier = modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Today's status
+                item {
+                    TodayStatusCard(
+                        schedules = schedules,
+                        todayRecord = viewModel.getTodayRecord()
+                    )
+                }
+
+                // History header
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (isSelectMode) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "${selectedRecordIds.size}件選択",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                IconButton(onClick = { viewModel.selectAllRecords() }) {
+                                    Icon(Icons.Default.SelectAll, contentDescription = "全選択")
+                                }
+                                IconButton(onClick = {
+                                    if (selectedRecordIds.isNotEmpty()) {
+                                        showDeleteSelectedDialog = true
+                                    }
+                                }) {
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        contentDescription = "削除",
+                                        tint = if (selectedRecordIds.isNotEmpty())
+                                            MaterialTheme.colorScheme.error
+                                        else
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                IconButton(onClick = { viewModel.exitSelectMode() }) {
+                                    Icon(Icons.Default.Close, contentDescription = "選択解除")
+                                }
+                            }
+                        } else {
+                            Text(
+                                text = "服薬履歴",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            if (intakeRecords.isNotEmpty()) {
+                                TextButton(onClick = { viewModel.enterSelectMode() }) {
+                                    Text("選択")
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // History records
+                items(intakeRecords.take(30)) { record ->
+                    HistoryRecordRow(
+                        record = record,
+                        isSelectMode = isSelectMode,
+                        isSelected = record.id in selectedRecordIds,
+                        onSelect = { viewModel.toggleRecordSelection(record.id) }
+                    )
+                }
             }
 
-            // History
-            item {
-                Text(
-                    text = "服薬履歴",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
-            items(intakeRecords.take(30)) { record ->
-                HistoryRecordCard(record)
+            // App Log Panel as an overlay at the bottom
+            if (showAppLogsOverlay) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                ) {
+                    AppLogCard(
+                        logs = appLogs,
+                        onDismiss = { showAppLogsOverlay = false },
+                        onClearLogs = { viewModel.clearLogs() },
+                        onSaveLogs = { viewModel.saveLogs(context) }
+                    )
+                }
             }
         }
     }
@@ -127,7 +282,7 @@ fun MainScreen(
 
 @Composable
 fun TodayStatusCard(
-    schedules: List<com.pirorin215.medicinecasemob.ui.data.MedicineSchedule>,
+    schedules: List<MedicineSchedule>,
     todayRecord: MedicineIntakeRecord?
 ) {
     Card(
@@ -142,26 +297,37 @@ fun TodayStatusCard(
                 .padding(16.dp)
         ) {
             Text(
-                text = "本日の服用状況",
+                text = "本日の服薬状況",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
-            ScheduleType.values().forEach { type ->
+            // Always show all 3 periods
+            ScheduleType.entries.forEach { type ->
                 val schedule = schedules.find { it.id == type.id }
-                if (schedule?.enabled == true) {
-                    ScheduleStatusRow(
-                        type = type,
-                        time = "${schedule.hour}:${String.format("%02d", schedule.minute)}",
-                        taken = when (type) {
-                            ScheduleType.MORNING -> todayRecord?.morningTaken == true
-                            ScheduleType.AFTERNOON -> todayRecord?.afternoonTaken == true
-                            ScheduleType.EVENING -> todayRecord?.eveningTaken == true
-                        }
-                    )
+                val enabled = schedule?.enabled ?: true
+                val taken = when (type) {
+                    ScheduleType.MORNING -> todayRecord?.morningTaken == true
+                    ScheduleType.AFTERNOON -> todayRecord?.afternoonTaken == true
+                    ScheduleType.EVENING -> todayRecord?.eveningTaken == true
                 }
+                val timeRange = if (schedule != null) {
+                    "%02d:%02d-%02d:%02d".format(
+                        schedule.startHour, schedule.startMinute,
+                        schedule.endHour, schedule.endMinute
+                    )
+                } else {
+                    "${type.defaultStartHour}:00-${type.defaultEndHour}:00"
+                }
+
+                ScheduleStatusRow(
+                    type = type,
+                    timeRange = timeRange,
+                    taken = taken,
+                    enabled = enabled
+                )
             }
         }
     }
@@ -170,8 +336,9 @@ fun TodayStatusCard(
 @Composable
 fun ScheduleStatusRow(
     type: ScheduleType,
-    time: String,
-    taken: Boolean
+    timeRange: String,
+    taken: Boolean,
+    enabled: Boolean = true
 ) {
     Row(
         modifier = Modifier
@@ -184,63 +351,86 @@ fun ScheduleStatusRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                imageVector = if (taken) Icons.Default.Check else Icons.Default.Close,
-                contentDescription = null,
-                tint = if (taken) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.error
-                }
+            Text(
+                text = if (taken) "✅" else "⬜",
+                style = MaterialTheme.typography.bodyLarge
             )
             Text(
                 text = type.displayName,
-                style = MaterialTheme.typography.bodyLarge
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium
             )
         }
 
         Text(
-            text = time,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            text = timeRange,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
         )
     }
 }
 
 @Composable
-fun HistoryRecordCard(record: MedicineIntakeRecord) {
-    val dateFormat = SimpleDateFormat("MM月dd日(E)", Locale.JAPAN)
+fun HistoryRecordRow(
+    record: MedicineIntakeRecord,
+    isSelectMode: Boolean,
+    isSelected: Boolean,
+    onSelect: () -> Unit
+) {
+    val dateFormat = SimpleDateFormat("MM月dd日（E）", Locale.JAPAN)
+    val dateStr = dateFormat.format(Date(record.date * 1000))
 
     Card(
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (isSelectMode) Modifier.clickable { onSelect() } else Modifier
+            ),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelectMode && isSelected)
+                MaterialTheme.colorScheme.secondaryContainer
+            else
+                CardDefaults.cardColors().containerColor
+        )
     ) {
-        Column(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
+            // Checkbox indicator in select mode
+            if (isSelectMode) {
+                Icon(
+                    imageVector = if (isSelected) Icons.Default.Check else Icons.Default.Close,
+                    contentDescription = null,
+                    tint = if (isSelected) MaterialTheme.colorScheme.primary
+                           else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(end = 8.dp)
+                )
+            }
+
             Text(
-                text = dateFormat.format(Date(record.date * 1000)),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
+                text = dateStr,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium
             )
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.weight(1f))
 
-            ScheduleType.values().forEach { type ->
+            // Show all 3 periods inline
+            ScheduleType.entries.forEach { type ->
                 val taken = when (type) {
                     ScheduleType.MORNING -> record.morningTaken
                     ScheduleType.AFTERNOON -> record.afternoonTaken
                     ScheduleType.EVENING -> record.eveningTaken
                 }
-
-                if (taken || record.date == System.currentTimeMillis() / 1000) {
-                    ScheduleStatusRow(
-                        type = type,
-                        time = "",  // Show empty for history
-                        taken = taken
-                    )
-                }
+                Text(
+                    text = if (taken) "✅${type.displayName}" else "⬜${type.displayName}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(start = 8.dp)
+                )
             }
         }
     }
@@ -254,7 +444,7 @@ fun BleConnectionDialog(
     val bleConnectionState by viewModel.bleConnectionState.collectAsState()
     val scanResults by viewModel.scanResults.collectAsState()
 
-    androidx.compose.material3.AlertDialog(
+    AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("BLE接続") },
         text = {
@@ -267,7 +457,7 @@ fun BleConnectionDialog(
                         Text("Medicine Caseデバイスを探しています...")
 
                         if (scanResults.isEmpty()) {
-                            androidx.compose.material3.Button(
+                            Button(
                                 onClick = { viewModel.startBleScan() },
                                 modifier = Modifier.fillMaxWidth()
                             ) {
@@ -277,13 +467,13 @@ fun BleConnectionDialog(
                     }
                     is BleManager.ConnectionState.Scanning -> {
                         Text("スキャン中...")
-                        androidx.compose.material3.CircularProgressIndicator(
+                        CircularProgressIndicator(
                             modifier = Modifier.align(Alignment.CenterHorizontally)
                         )
                     }
                     is BleManager.ConnectionState.Connecting -> {
                         Text("接続中...")
-                        androidx.compose.material3.CircularProgressIndicator(
+                        CircularProgressIndicator(
                             modifier = Modifier.align(Alignment.CenterHorizontally)
                         )
                     }
@@ -293,10 +483,8 @@ fun BleConnectionDialog(
 
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        androidx.compose.material3.Button(
-                            onClick = {
-                                viewModel.syncTime()
-                            },
+                        Button(
+                            onClick = { viewModel.syncTime() },
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text("時刻同期")
@@ -304,10 +492,8 @@ fun BleConnectionDialog(
 
                         Spacer(modifier = Modifier.height(4.dp))
 
-                        androidx.compose.material3.Button(
-                            onClick = {
-                                viewModel.disconnectBle()
-                            },
+                        Button(
+                            onClick = { viewModel.disconnectBle() },
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text("切断")
@@ -321,17 +507,13 @@ fun BleConnectionDialog(
                     Text("見つかったデバイス:", style = MaterialTheme.typography.titleSmall)
                     scanResults.forEach { result ->
                         val device = result.device
-                        androidx.compose.material3.Card(
+                        Card(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 4.dp),
-                            onClick = {
-                                viewModel.connectToDevice(device)
-                            }
+                            onClick = { viewModel.connectToDevice(device) }
                         ) {
-                            Column(
-                                modifier = Modifier.padding(8.dp)
-                            ) {
+                            Column(modifier = Modifier.padding(8.dp)) {
                                 Text(
                                     text = device.name ?: "不明",
                                     style = MaterialTheme.typography.bodyMedium,
@@ -351,12 +533,12 @@ fun BleConnectionDialog(
         confirmButton = {
             when (bleConnectionState) {
                 is BleManager.ConnectionState.Scanning -> {
-                    androidx.compose.material3.TextButton(onClick = { viewModel.stopBleScan() }) {
+                    TextButton(onClick = { viewModel.stopBleScan() }) {
                         Text("スキャン停止")
                     }
                 }
                 else -> {
-                    androidx.compose.material3.TextButton(onClick = onDismiss) {
+                    TextButton(onClick = onDismiss) {
                         Text("閉じる")
                     }
                 }
@@ -364,3 +546,4 @@ fun BleConnectionDialog(
         }
     )
 }
+

@@ -8,7 +8,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [MedicineSchedule::class, MedicineIntakeRecord::class, DetectionSettings::class],
-    version = 3,
+    version = 5,
     exportSchema = false
 )
 abstract class MedicineDatabase : RoomDatabase() {
@@ -26,10 +26,10 @@ abstract class MedicineDatabase : RoomDatabase() {
                     "INSERT INTO detection_settings (id, movementThreshold, cooldownTime) " +
                     "VALUES (1, 70.0, 30000)"
                 )
-                // Insert default schedules (morning 7:00, afternoon 12:00, evening 19:00)
-                db.execSQL("INSERT INTO schedules (id, enabled, hour, minute, taken, takenTimestamp) VALUES (0, 1, 7, 0, 0, 0)")
-                db.execSQL("INSERT INTO schedules (id, enabled, hour, minute, taken, takenTimestamp) VALUES (1, 1, 12, 0, 0, 0)")
-                db.execSQL("INSERT INTO schedules (id, enabled, hour, minute, taken, takenTimestamp) VALUES (2, 1, 19, 0, 0, 0)")
+                // Insert default schedules with time ranges
+                db.execSQL("INSERT INTO schedules (id, enabled, startHour, startMinute, endHour, endMinute) VALUES (0, 1, 8, 0, 11, 0)")
+                db.execSQL("INSERT INTO schedules (id, enabled, startHour, startMinute, endHour, endMinute) VALUES (1, 1, 12, 0, 17, 0)")
+                db.execSQL("INSERT INTO schedules (id, enabled, startHour, startMinute, endHour, endMinute) VALUES (2, 1, 19, 0, 22, 0)")
             }
         }
 

@@ -18,7 +18,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
+import com.pirorin215.medicinecasemob.util.LogManager
 import androidx.core.app.NotificationCompat
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.isActive
@@ -33,6 +33,8 @@ import javax.inject.Inject
 
 @AndroidEntryPoint
 class MedicineBleScanService : Service() {
+    private val logManager = LogManager.getInstance()
+
 
     companion object {
         private const val TAG = "MedicineBleScanService"
@@ -56,13 +58,13 @@ class MedicineBleScanService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder {
-        Log.d(TAG, "onBind called")
+        logManager.d(TAG, "onBind called")
         return binder
     }
 
     override fun onCreate() {
         super.onCreate()
-        Log.d(TAG, "onCreate called")
+        logManager.d(TAG, "onCreate called")
 
         bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         bluetoothAdapter = bluetoothManager.adapter
@@ -78,7 +80,7 @@ class MedicineBleScanService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Log.d(TAG, "onStartCommand called")
+        logManager.d(TAG, "onStartCommand called")
 
         // Start foreground service
         startForeground(NOTIFICATION_ID, createNotification())
@@ -88,7 +90,7 @@ class MedicineBleScanService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        Log.d(TAG, "onDestroy called")
+        logManager.d(TAG, "onDestroy called")
 
         // Stop scanning
         stopContinuousScanning()
@@ -97,7 +99,7 @@ class MedicineBleScanService : Service() {
         try {
             unregisterReceiver(bluetoothStateReceiver)
         } catch (e: Exception) {
-            Log.e(TAG, "Error unregistering receiver: ${e.message}")
+            logManager.e(TAG, "Error unregistering receiver: ${e.message}")
         }
     }
 
@@ -107,11 +109,11 @@ class MedicineBleScanService : Service() {
                 val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
                 when (state) {
                     BluetoothAdapter.STATE_OFF -> {
-                        Log.d(TAG, "Bluetooth turned OFF - stopping scan")
+                        logManager.d(TAG, "Bluetooth turned OFF - stopping scan")
                         stopContinuousScanning()
                     }
                     BluetoothAdapter.STATE_ON -> {
-                        Log.d(TAG, "Bluetooth turned ON - starting scan")
+                        logManager.d(TAG, "Bluetooth turned ON - starting scan")
                         startContinuousScanning()
                     }
                 }
@@ -120,31 +122,31 @@ class MedicineBleScanService : Service() {
     }
 
     private fun startContinuousScanning() {
-        Log.d(TAG, "Starting continuous scanning")
+        logManager.d(TAG, "Starting continuous scanning")
 
         scanJob?.cancel()
         scanJob = CoroutineScope(Dispatchers.IO).launch {
             while (isActive) { // Continue until cancelled
                 if (!isBluetoothAvailable()) {
-                    Log.d(TAG, "Bluetooth not available, waiting...")
+                    logManager.d(TAG, "Bluetooth not available, waiting...")
                     delay(5000)
                     continue
                 }
 
                 if (!isBluetoothEnabled()) {
-                    Log.d(TAG, "Bluetooth not enabled, waiting...")
+                    logManager.d(TAG, "Bluetooth not enabled, waiting...")
                     delay(5000)
                     continue
                 }
 
                 // Check if already connected
                 if (bleManager.connectionState.value is BleManager.ConnectionState.Connected) {
-                    Log.d(TAG, "Already connected, skipping scan")
+                    logManager.d(TAG, "Already connected, skipping scan")
                     delay(SCAN_INTERVAL_MS)
                     continue
                 }
 
-                Log.d(TAG, "Starting BLE scan...")
+                logManager.d(TAG, "Starting BLE scan...")
                 bleManager.startScan()
 
                 // Wait before next scan
@@ -154,7 +156,7 @@ class MedicineBleScanService : Service() {
     }
 
     private fun stopContinuousScanning() {
-        Log.d(TAG, "Stopping continuous scanning")
+        logManager.d(TAG, "Stopping continuous scanning")
         scanJob?.cancel()
         scanJob = null
         bleManager.stopScan()

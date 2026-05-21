@@ -4,10 +4,13 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.pirorin215.medicinecasemob.ble.BleManager
+import com.pirorin215.medicinecasemob.notification.NotificationService
 import com.pirorin215.medicinecasemob.ui.data.MedicineIntakeRecord
 import com.pirorin215.medicinecasemob.ui.data.MedicineRepository
 import com.pirorin215.medicinecasemob.ui.data.MedicineSchedule
+import com.pirorin215.medicinecasemob.ui.data.MedicineSettingsRepository
 import com.pirorin215.medicinecasemob.ui.data.ScheduleType
+import com.pirorin215.medicinecasemob.util.LogManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -19,7 +22,10 @@ import javax.inject.Inject
 @HiltViewModel
 class MainViewModel @Inject constructor(
     private val repository: MedicineRepository,
-    private val bleManager: BleManager
+    private val settingsRepository: MedicineSettingsRepository,
+    private val bleManager: BleManager,
+    private val notificationService: NotificationService,
+    private val logManager: LogManager
 ) : ViewModel() {
 
     companion object {
@@ -35,8 +41,23 @@ class MainViewModel @Inject constructor(
     private val _isConnected = MutableStateFlow(false)
     val isConnected: StateFlow<Boolean> = _isConnected.asStateFlow()
 
+    private val _selectedRecordIds = MutableStateFlow<Set<Long>>(emptySet())
+    val selectedRecordIds: StateFlow<Set<Long>> = _selectedRecordIds.asStateFlow()
+
+    private val _isSelectMode = MutableStateFlow(false)
+    val isSelectMode: StateFlow<Boolean> = _isSelectMode.asStateFlow()
+
     val bleConnectionState = bleManager.connectionState
     val scanResults = bleManager.scanResults
+    val appLogs: StateFlow<List<String>> = logManager.logs
+
+    fun clearLogs() {
+        logManager.clearLogs()
+    }
+
+    fun saveLogs(context: android.content.Context): String? {
+        return logManager.saveLogsToFile(context)
+    }
 
     init {
         loadSchedules()
@@ -46,9 +67,11 @@ class MainViewModel @Inject constructor(
     }
 
     private fun loadSchedules() {
+        // Load schedules from Room database
         viewModelScope.launch {
             repository.getAllSchedules().collect { schedules ->
                 _schedules.value = schedules
+                Log.d(TAG, "Schedules loaded from Room DB: ${schedules.size} items")
             }
         }
     }
@@ -66,9 +89,20 @@ class MainViewModel @Inject constructor(
             bleManager.connectionState.collect { state ->
                 _isConnected.value = state is BleManager.ConnectionState.Connected
 
-                // On reconnect, check for missed intake events
+                // On connect: sync time, check for missed intake events, and notify if needed
                 if (state is BleManager.ConnectionState.Connected) {
+                    bleManager.syncTime()
                     bleManager.getIntake()
+
+                    // Check for missed intakes and notify immediately
+                    val todayRecord = getTodayRecord()
+                    val schedules = _schedules.value
+                    notificationService.checkAndNotifyMissedIntakes(
+                        schedules = schedules,
+                        todayRecord = todayRecord,
+                        isConnectedToBle = true,
+                        forceNotification = true
+                    )
                 }
             }
         }
@@ -102,52 +136,148 @@ class MainViewModel @Inject constructor(
 
                 // Consume the event
                 bleManager.consumeIntakeEvent()
+
+                // Clear the last intake timestamp for debug
+                bleManager.clearLastIntakeTimestamp()
             }
         }
     }
 
     /**
      * Record an intake event in the local database.
-     * Determines morning/afternoon/evening based on the hour of the intake timestamp.
+     * Uses the phone's current time for date and period determination,
+     * since the MCU timestamp may be unsynced (seconds since boot).
      */
-    private fun recordIntakeLocally(timestamp: Long) {
+    private fun recordIntakeLocally(mcuTimestamp: Long) {
         viewModelScope.launch {
-            val calendar = Calendar.getInstance().apply {
-                timeInMillis = timestamp * 1000
+            val now = Calendar.getInstance()
+            val phoneTimestamp = System.currentTimeMillis() / 1000
+
+            // Get today's record
+            val todayCal = (now.clone() as Calendar).apply {
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
             }
-            val hour = calendar.get(Calendar.HOUR_OF_DAY)
-
-            // Determine which period this intake belongs to
-            val scheduleType = determineScheduleType(hour)
-
-            // Get or create today's record
-            calendar.set(Calendar.HOUR_OF_DAY, 0)
-            calendar.set(Calendar.MINUTE, 0)
-            calendar.set(Calendar.SECOND, 0)
-            calendar.set(Calendar.MILLISECOND, 0)
-            val todayStart = calendar.timeInMillis / 1000
+            val todayStart = todayCal.timeInMillis / 1000
 
             val existingRecord = repository.getIntakeRecordByDateSync(todayStart)
-            val record = existingRecord ?: MedicineIntakeRecord(date = todayStart)
 
+            // Check 30-minute rule: ignore if less than 30 minutes since last intake
+            val lastIntakeTime = getLastIntakeTime(existingRecord)
+            val minutesSince = if (lastIntakeTime > 0) {
+                (phoneTimestamp - lastIntakeTime) / 60
+            } else {
+                Long.MAX_VALUE
+            }
+
+            if (minutesSince < 30) {
+                Log.d(TAG, "Ignoring intake: only ${minutesSince}m since last intake")
+                bleManager.clearIntake()
+                return@launch
+            }
+
+            // Determine which period this intake belongs to based on time ranges
+            val schedules = _schedules.value
+            val scheduleType = determineScheduleTypeForTimestamp(phoneTimestamp, schedules)
+
+            if (scheduleType == null) {
+                Log.d(TAG, "Ignoring intake: no valid schedule for current time")
+                bleManager.clearIntake()
+                return@launch
+            }
+
+            // Check if already taken for this period
+            val alreadyTaken = when (scheduleType) {
+                ScheduleType.MORNING -> existingRecord?.morningTaken == true
+                ScheduleType.AFTERNOON -> existingRecord?.afternoonTaken == true
+                ScheduleType.EVENING -> existingRecord?.eveningTaken == true
+            }
+
+            if (alreadyTaken) {
+                Log.d(TAG, "Ignoring intake: already recorded for $scheduleType")
+                bleManager.clearIntake()
+                return@launch
+            }
+
+            // Record intake
+            val record = existingRecord ?: MedicineIntakeRecord(date = todayStart)
             val updatedRecord = when (scheduleType) {
                 ScheduleType.MORNING -> record.copy(
                     morningTaken = true,
-                    morningTime = timestamp
+                    morningTime = phoneTimestamp
                 )
                 ScheduleType.AFTERNOON -> record.copy(
                     afternoonTaken = true,
-                    afternoonTime = timestamp
+                    afternoonTime = phoneTimestamp
                 )
                 ScheduleType.EVENING -> record.copy(
                     eveningTaken = true,
-                    eveningTime = timestamp
+                    eveningTime = phoneTimestamp
                 )
             }
 
             repository.insertIntakeRecord(updatedRecord)
-            Log.d(TAG, "Intake recorded: $scheduleType at timestamp=$timestamp")
+            Log.d(TAG, "Intake recorded: $scheduleType at phoneTime=$phoneTimestamp (mcuTime=$mcuTimestamp)")
+
+            // Clear intake on firmware
+            bleManager.clearIntake()
         }
+    }
+
+    /**
+     * Get the last intake timestamp from today's record
+     */
+    private fun getLastIntakeTime(record: MedicineIntakeRecord?): Long {
+        return record?.let {
+            maxOf(
+                if (it.morningTaken) it.morningTime else 0L,
+                if (it.afternoonTaken) it.afternoonTime else 0L,
+                if (it.eveningTaken) it.eveningTime else 0L
+            )
+        } ?: 0L
+    }
+
+    /**
+     * Determine schedule type based on timestamp and configured time ranges.
+     * Returns null if timestamp doesn't fall within any schedule range.
+     */
+    private fun determineScheduleTypeForTimestamp(
+        timestamp: Long,
+        schedules: List<MedicineSchedule>
+    ): ScheduleType? {
+        // Convert Unix timestamp to hour/minute using Calendar
+        val cal = Calendar.getInstance()
+        cal.timeInMillis = timestamp * 1000  // Convert seconds to milliseconds
+        val hour = cal.get(Calendar.HOUR_OF_DAY)
+        val minute = cal.get(Calendar.MINUTE)
+        val currentMinutes = hour * 60 + minute
+
+        Log.d(TAG, "determineScheduleTypeForTimestamp: timestamp=$timestamp, hour=$hour, minute=$minute, currentMinutes=$currentMinutes")
+
+        for (schedule in schedules) {
+            if (!schedule.enabled) continue
+
+            val startMinutes = schedule.startHour * 60 + schedule.startMinute
+            val endMinutes = schedule.endHour * 60 + schedule.endMinute
+
+            Log.d(TAG, "Checking schedule ${schedule.id}: enabled=${schedule.enabled}, range=$startMinutes-$endMinutes, current=$currentMinutes")
+
+            // Check if current time is within schedule range
+            if (currentMinutes in startMinutes..endMinutes) {
+                Log.d(TAG, "Matched schedule: ${schedule.id}")
+                return when (schedule.id) {
+                    0 -> ScheduleType.MORNING
+                    1 -> ScheduleType.AFTERNOON
+                    2 -> ScheduleType.EVENING
+                    else -> null
+                }
+            }
+        }
+
+        Log.d(TAG, "No matching schedule found")
+        return null  // No matching schedule
     }
 
     /**
@@ -155,6 +285,7 @@ class MainViewModel @Inject constructor(
      * Morning: 4:00 - 11:59
      * Afternoon: 12:00 - 17:59
      * Evening: 18:00 - 3:59 (next day)
+     * NOTE: This is fallback for UI display, not for intake recording
      */
     private fun determineScheduleType(hour: Int): ScheduleType {
         return when (hour) {
@@ -205,7 +336,46 @@ class MainViewModel @Inject constructor(
         return _intakeRecords.value.find { it.date == todayStart }
     }
 
-    fun getScheduleName(type: ScheduleType): String {
-        return type.displayName
+    // --- History selection ---
+
+    fun enterSelectMode() {
+        _isSelectMode.value = true
+        _selectedRecordIds.value = emptySet()
+    }
+
+    fun exitSelectMode() {
+        _isSelectMode.value = false
+        _selectedRecordIds.value = emptySet()
+    }
+
+    fun toggleRecordSelection(recordId: Long) {
+        val current = _selectedRecordIds.value
+        _selectedRecordIds.value = if (recordId in current) {
+            current - recordId
+        } else {
+            current + recordId
+        }
+    }
+
+    fun selectAllRecords() {
+        _selectedRecordIds.value = _intakeRecords.value.map { it.id }.toSet()
+    }
+
+    fun deleteSelectedRecords() {
+        val ids = _selectedRecordIds.value.toList()
+        if (ids.isEmpty()) return
+
+        viewModelScope.launch {
+            repository.deleteIntakeRecordsByIds(ids)
+            Log.d(TAG, "Deleted ${ids.size} intake records")
+            exitSelectMode()
+        }
+    }
+
+    fun clearHistory() {
+        viewModelScope.launch {
+            repository.deleteAllIntakeRecords()
+            Log.d(TAG, "All intake records cleared")
+        }
     }
 }

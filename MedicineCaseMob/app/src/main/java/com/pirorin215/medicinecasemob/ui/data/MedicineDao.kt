@@ -13,6 +13,9 @@ interface MedicineDao {
     @Query("SELECT * FROM schedules")
     fun getAllSchedules(): Flow<List<MedicineSchedule>>
 
+    @Query("SELECT * FROM schedules")
+    suspend fun getAllSchedulesSync(): List<MedicineSchedule>
+
     @Query("SELECT * FROM schedules WHERE id = :id")
     fun getScheduleById(id: Int): Flow<MedicineSchedule?>
 
@@ -37,6 +40,12 @@ interface MedicineDao {
 
     @Update
     suspend fun updateIntakeRecord(record: MedicineIntakeRecord)
+
+    @Query("DELETE FROM intake_records")
+    suspend fun deleteAllIntakeRecords()
+
+    @Query("DELETE FROM intake_records WHERE id IN (:ids)")
+    suspend fun deleteIntakeRecordsByIds(ids: List<Long>)
 
     @Query("DELETE FROM intake_records WHERE date < :thresholdDate")
     suspend fun deleteOldRecords(thresholdDate: Long)

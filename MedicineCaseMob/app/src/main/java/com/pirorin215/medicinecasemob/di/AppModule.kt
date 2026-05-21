@@ -5,6 +5,7 @@ import com.pirorin215.medicinecasemob.ble.BleManager
 import com.pirorin215.medicinecasemob.ui.data.MedicineDatabase
 import com.pirorin215.medicinecasemob.ui.data.MedicineDao
 import com.pirorin215.medicinecasemob.ui.data.MedicineRepository
+import com.pirorin215.medicinecasemob.ui.data.MedicineSettingsRepository
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -15,6 +16,12 @@ import javax.inject.Singleton
 @Module
 @InstallIn(SingletonComponent::class)
 object AppModule {
+
+    @Provides
+    @Singleton
+    fun provideLogManager(): com.pirorin215.medicinecasemob.util.LogManager {
+        return com.pirorin215.medicinecasemob.util.LogManager.getInstance()
+    }
 
     @Provides
     @Singleton
@@ -41,6 +48,14 @@ object AppModule {
     fun provideBleManager(
         @ApplicationContext context: Context
     ): BleManager {
-        return BleManager(context)
+        return BleManager(com.pirorin215.medicinecasemob.util.LogManager.getInstance(), context)
+    }
+
+    @Provides
+    @Singleton
+    fun provideMedicineSettingsRepository(
+        @ApplicationContext context: Context
+    ): MedicineSettingsRepository {
+        return MedicineSettingsRepository(context)
     }
 }

@@ -1,5 +1,6 @@
 package com.pirorin215.medicinecasemob.ble
 
+import android.util.Log
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
@@ -15,16 +16,26 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
+import com.pirorin215.medicinecasemob.util.LogManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+data class IntakeEventItem(
+    val receivedAt: Long,        // スマホで受信した日時 (Unix timestamp in ms)
+    val mcuTimestamp: Long,      // マイコン側のタイムスタンプ (Unix timestamp in seconds)
+    val rawEvent: String         // 生データ "INTAKE:<timestamp>"
+)
 
 @Singleton
 class BleManager @Inject constructor(
+    private val logManager: LogManager,
     private val context: Context
 ) {
     companion object {
@@ -61,11 +72,25 @@ class BleManager @Inject constructor(
     private val _intakeEvent = MutableStateFlow<String?>(null)
     val intakeEvent: StateFlow<String?> = _intakeEvent.asStateFlow()
 
+    // Latest intake timestamp for debug
+    private val _lastIntakeTimestamp = MutableStateFlow<Long?>(null)
+    val lastIntakeTimestamp: StateFlow<Long?> = _lastIntakeTimestamp.asStateFlow()
+
+    // Intake event history (max 100 items)
+    private val _intakeEventHistory = MutableStateFlow<List<IntakeEventItem>>(emptyList())
+    val intakeEventHistory: StateFlow<List<IntakeEventItem>> = _intakeEventHistory.asStateFlow()
+
+    private val MAX_HISTORY_SIZE = 100
+
     private var bluetoothGatt: BluetoothGatt? = null
     private var isScanning = false
 
     // Write queue: Android BLE allows only one pending write at a time.
     // Commands are queued and processed sequentially via onCharacteristicWrite callback.
+    // Descriptor write queue: must serialize like command writes
+    private val descriptorQueue = mutableListOf<BluetoothGattDescriptor>()
+    private var isWritingDescriptor = false
+
     private val writeQueue = mutableListOf<String>()
     private var isWriting = false
 
@@ -73,7 +98,7 @@ class BleManager @Inject constructor(
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val device = result.device
             if (device.name?.startsWith(DEVICE_NAME_PREFIX) == true) {
-                Log.d(TAG, "Found device: ${device.name} (${device.address})")
+                logManager.d(TAG, "Found device: ${device.name} (${device.address})")
                 val updatedResults = _scanResults.value.toMutableList()
                 updatedResults.add(result)
                 _scanResults.value = updatedResults
@@ -84,13 +109,13 @@ class BleManager @Inject constructor(
             for (result in results) {
                 val device = result.device
                 if (device.name?.startsWith(DEVICE_NAME_PREFIX) == true) {
-                    Log.d(TAG, "Found device in batch: ${device.name} (${device.address})")
+                    logManager.d(TAG, "Found device in batch: ${device.name} (${device.address})")
                 }
             }
         }
 
         override fun onScanFailed(errorCode: Int) {
-            Log.e(TAG, "Scan failed: $errorCode")
+            logManager.e(TAG, "Scan failed: $errorCode")
             stopScan()
         }
     }
@@ -100,21 +125,21 @@ class BleManager @Inject constructor(
             val device = gatt.device
             when (newState) {
                 BluetoothGatt.STATE_CONNECTED -> {
-                    Log.d(TAG, "Connected to ${device.name} (${device.address})")
+                    logManager.d(TAG, "Connected to ${device.name} (${device.address})")
                     _connectionState.value = ConnectionState.Connected(device)
 
                     // Add delay before service discovery (from bikeclock)
                     Handler(Looper.getMainLooper()).postDelayed({
-                        Log.d(TAG, "Starting service discovery...")
+                        logManager.d(TAG, "Starting service discovery...")
                         val initiated = gatt.discoverServices()
                         if (!initiated) {
-                            Log.e(TAG, "Failed to initiate service discovery")
+                            logManager.e(TAG, "Failed to initiate service discovery")
                             disconnect()
                         }
                     }, 1000L) // 1 second delay before service discovery
                 }
                 BluetoothGatt.STATE_DISCONNECTED -> {
-                    Log.d(TAG, "Disconnected from ${device.name} (${device.address})")
+                    logManager.d(TAG, "Disconnected from ${device.name} (${device.address})")
                     _connectionState.value = ConnectionState.Disconnected
                     _serviceReady.value = false
                     gatt.close()
@@ -124,24 +149,24 @@ class BleManager @Inject constructor(
 
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
-                Log.d(TAG, "Services discovered")
+                logManager.d(TAG, "Services discovered")
                 val service = gatt.getService(SERVICE_UUID)
                 if (service != null) {
-                    Log.d(TAG, "Medicine Case service found")
+                    logManager.d(TAG, "Medicine Case service found")
 
                     // Add a small delay before marking service as ready
                     Handler(Looper.getMainLooper()).postDelayed({
                         _serviceReady.value = true
-                        Log.d(TAG, "Service is now ready for commands")
+                        logManager.d(TAG, "Service is now ready for commands")
                     }, 500L)
 
                     // Enable notifications on response and sensor characteristics
                     enableNotifications(gatt)
                 } else {
-                    Log.e(TAG, "Medicine Case service not found")
+                    logManager.e(TAG, "Medicine Case service not found")
                 }
             } else {
-                Log.e(TAG, "Service discovery failed: $status")
+                logManager.e(TAG, "Service discovery failed: $status")
             }
         }
 
@@ -151,26 +176,58 @@ class BleManager @Inject constructor(
             value: ByteArray
         ) {
             val data = String(value)
-            Log.d(TAG, "Characteristic changed: ${characteristic.uuid} -> $data")
+            logManager.d(TAG, "Characteristic changed: ${characteristic.uuid} -> $data")
 
             when (characteristic.uuid) {
                 CHAR_RESPONSE_UUID -> {
-                    Log.d(TAG, "Response: $data")
+                    logManager.d(TAG, "Response: $data")
                     // Handle GET:intake response
                     if (data.startsWith("INTAKE:")) {
-                        Log.d(TAG, "Intake response received: $data")
+                        logManager.d(TAG, "Intake response received: $data")
                         _intakeEvent.value = data
+                        // Update last intake timestamp for debug
+                        val timestampStr = data.removePrefix("INTAKE:")
+                        val timestamp = timestampStr.toLongOrNull()
+                        if (timestamp != null && timestamp > 0) {
+                            _lastIntakeTimestamp.value = timestamp
+                            addToIntakeHistory(data, timestamp)
+                        }
                     }
                 }
                 CHAR_SENSOR_UUID -> {
-                    Log.d(TAG, "Sensor data: $data")
+                    logManager.d(TAG, "Sensor data: $data")
                     // Handle INTAKE notification from sensor characteristic
                     if (data.startsWith("INTAKE:")) {
-                        Log.d(TAG, "Intake event received: $data")
+                        logManager.d(TAG, "Intake event received: $data")
                         _intakeEvent.value = data
+                        // Update last intake timestamp for debug
+                        val timestampStr = data.removePrefix("INTAKE:")
+                        val timestamp = timestampStr.toLongOrNull()
+                        if (timestamp != null && timestamp > 0) {
+                            _lastIntakeTimestamp.value = timestamp
+                            addToIntakeHistory(data, timestamp)
+                        }
                     }
                 }
             }
+        }
+
+        override fun onDescriptorWrite(
+            gatt: BluetoothGatt,
+            descriptor: BluetoothGattDescriptor,
+            status: Int
+        ) {
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                logManager.d(TAG, "Descriptor write success: ${descriptor.characteristic.uuid}")
+            } else {
+                logManager.e(TAG, "Descriptor write failed: ${descriptor.characteristic.uuid}, status: $status")
+            }
+
+            // Process next descriptor in queue
+            synchronized(descriptorQueue) {
+                isWritingDescriptor = false
+            }
+            processDescriptorQueue()
         }
 
         override fun onCharacteristicWrite(
@@ -179,9 +236,9 @@ class BleManager @Inject constructor(
             status: Int
         ) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
-                Log.d(TAG, "Write success: ${characteristic.uuid}")
+                logManager.d(TAG, "Write success: ${characteristic.uuid}")
             } else {
-                Log.e(TAG, "Write failed: ${characteristic.uuid}, status: $status")
+                logManager.e(TAG, "Write failed: ${characteristic.uuid}, status: $status")
             }
 
             // Process next command in queue
@@ -206,12 +263,12 @@ class BleManager @Inject constructor(
     @SuppressLint("MissingPermission")
     fun startScan() {
         if (!isBluetoothAvailable()) {
-            Log.e(TAG, "Bluetooth LE not available")
+            logManager.e(TAG, "Bluetooth LE not available")
             return
         }
 
         if (!isBluetoothEnabled()) {
-            Log.e(TAG, "Bluetooth not enabled")
+            logManager.e(TAG, "Bluetooth not enabled")
             return
         }
 
@@ -220,20 +277,20 @@ class BleManager @Inject constructor(
             return
         }
 
-        Log.d(TAG, "Starting BLE scan...")
+        logManager.d(TAG, "Starting BLE scan...")
 
         // First, try to find bonded devices
         val bondedDevices = bluetoothAdapter?.bondedDevices
         val bondedMedicineCase = bondedDevices?.find { it.name?.startsWith(DEVICE_NAME_PREFIX) == true }
 
         if (bondedMedicineCase != null) {
-            Log.d(TAG, "Found bonded device: ${bondedMedicineCase.name} (${bondedMedicineCase.address})")
+            logManager.d(TAG, "Found bonded device: ${bondedMedicineCase.name} (${bondedMedicineCase.address})")
             // Connect directly to bonded device
             connectToDevice(bondedMedicineCase)
             return
         }
 
-        Log.d(TAG, "No bonded device found, starting scan...")
+        logManager.d(TAG, "No bonded device found, starting scan...")
         isScanning = true
         _scanResults.value = emptyList()
 
@@ -251,14 +308,14 @@ class BleManager @Inject constructor(
             return
         }
 
-        Log.d(TAG, "Stopping BLE scan...")
+        logManager.d(TAG, "Stopping BLE scan...")
         isScanning = false
         bluetoothLeScanner?.stopScan(scanCallback)
     }
 
     @SuppressLint("MissingPermission")
     fun connectToDevice(device: BluetoothDevice) {
-        Log.d(TAG, "Connecting to ${device.name} (${device.address})...")
+        logManager.d(TAG, "Connecting to ${device.name} (${device.address})...")
         _connectionState.value = ConnectionState.Connecting
 
         // Disconnect from current device if connected
@@ -269,7 +326,7 @@ class BleManager @Inject constructor(
     }
 
     fun disconnect() {
-        Log.d(TAG, "Disconnecting...")
+        logManager.d(TAG, "Disconnecting...")
         synchronized(writeQueue) {
             writeQueue.clear()
             isWriting = false
@@ -284,50 +341,71 @@ class BleManager @Inject constructor(
     private fun enableNotifications(gatt: BluetoothGatt) {
         val service = gatt.getService(SERVICE_UUID) ?: return
 
-        // Enable notifications for response characteristic
+        // Queue descriptors for both characteristics (must write one at a time)
         val responseChar = service.getCharacteristic(CHAR_RESPONSE_UUID)
         if (responseChar != null) {
-            Log.d(TAG, "Enabling notifications for response characteristic")
+            logManager.d(TAG, "Queueing notification enable for response characteristic")
             gatt.setCharacteristicNotification(responseChar, true)
             val descriptor = responseChar.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG_UUID)
-            descriptor?.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-            gatt.writeDescriptor(descriptor)
+            if (descriptor != null) {
+                descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                synchronized(descriptorQueue) {
+                    descriptorQueue.add(descriptor)
+                }
+            }
         }
 
-        // Enable notifications for sensor characteristic
         val sensorChar = service.getCharacteristic(CHAR_SENSOR_UUID)
         if (sensorChar != null) {
-            Log.d(TAG, "Enabling notifications for sensor characteristic")
+            logManager.d(TAG, "Queueing notification enable for sensor characteristic")
             gatt.setCharacteristicNotification(sensorChar, true)
             val descriptor = sensorChar.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG_UUID)
-            descriptor?.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-            gatt.writeDescriptor(descriptor)
+            if (descriptor != null) {
+                descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                synchronized(descriptorQueue) {
+                    descriptorQueue.add(descriptor)
+                }
+            }
+        }
+
+        // Start processing the queue
+        processDescriptorQueue()
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun processDescriptorQueue() {
+        synchronized(descriptorQueue) {
+            if (isWritingDescriptor || descriptorQueue.isEmpty()) return
+            isWritingDescriptor = true
+            val descriptor = descriptorQueue.removeAt(0)
+            bluetoothGatt?.writeDescriptor(descriptor)
+            logManager.d(TAG, "Descriptor write initiated for ${descriptor.characteristic.uuid}")
         }
     }
 
     @SuppressLint("MissingPermission")
     fun sendCommand(command: String): Boolean {
-        Log.d(TAG, "sendCommand() called: $command")
+        logManager.d(TAG, "sendCommand() called: $command")
 
         val gatt = bluetoothGatt ?: run {
-            Log.e(TAG, "sendCommand failed: bluetoothGatt is null")
+            logManager.e(TAG, "sendCommand failed: bluetoothGatt is null")
             return false
         }
 
         // Validate service and characteristic exist
         val service = gatt.getService(SERVICE_UUID) ?: run {
-            Log.e(TAG, "sendCommand failed: Service not found")
+            logManager.e(TAG, "sendCommand failed: Service not found")
             return false
         }
 
         service.getCharacteristic(CHAR_COMMAND_UUID) ?: run {
-            Log.e(TAG, "sendCommand failed: Command characteristic not found")
+            logManager.e(TAG, "sendCommand failed: Command characteristic not found")
             return false
         }
 
         synchronized(writeQueue) {
             writeQueue.add(command)
-            Log.d(TAG, "Command queued (size: ${writeQueue.size}): $command")
+            logManager.d(TAG, "Command queued (size: ${writeQueue.size}): $command")
 
             if (!isWriting) {
                 processWriteQueue()
@@ -369,9 +447,9 @@ class BleManager @Inject constructor(
         val result = gatt.writeCharacteristic(commandChar)
         if (result) {
             isWriting = true
-            Log.d(TAG, "Write initiated: $command")
+            logManager.d(TAG, "Write initiated: $command")
         } else {
-            Log.e(TAG, "writeCharacteristic failed, removing from queue: $command")
+            logManager.e(TAG, "writeCharacteristic failed, removing from queue: $command")
             writeQueue.removeAt(0)
             // Retry next command
             processWriteQueue()
@@ -386,23 +464,23 @@ class BleManager @Inject constructor(
 
     fun setDetectionAngle(angle: Float): Boolean {
         val command = "SET:detection:angle:$angle"
-        Log.d(TAG, "setDetectionAngle: $command")
+        logManager.d(TAG, "setDetectionAngle: $command")
         return sendCommand(command)
     }
 
     fun setDetectionCooldown(cooldownMs: Long): Boolean {
         val command = "SET:detection:cooldown:$cooldownMs"
-        Log.d(TAG, "setDetectionCooldown: $command")
+        logManager.d(TAG, "setDetectionCooldown: $command")
         return sendCommand(command)
     }
 
     fun getIntake(): Boolean {
-        Log.d(TAG, "getIntake: requesting intake timestamp")
+        logManager.d(TAG, "getIntake: requesting intake timestamp")
         return sendCommand("GET:intake")
     }
 
     fun clearIntake(): Boolean {
-        Log.d(TAG, "clearIntake: clearing intake timestamp")
+        logManager.d(TAG, "clearIntake: clearing intake timestamp")
         return sendCommand("CLR:intake")
     }
 
@@ -422,6 +500,39 @@ class BleManager @Inject constructor(
 
     fun getVersion() {
         sendCommand("GET:version")
+    }
+
+    /**
+     * Clear the last intake timestamp (for debug purposes).
+     * Called when intake event is consumed and processed.
+     */
+    fun clearLastIntakeTimestamp() {
+        _lastIntakeTimestamp.value = null
+    }
+
+    /**
+     * Add an intake event to history.
+     * @param rawEvent Raw event string (e.g. "INTAKE:1234567890")
+     * @param mcuTimestamp Parsed timestamp from the event
+     */
+    private fun addToIntakeHistory(rawEvent: String, mcuTimestamp: Long) {
+        val now = System.currentTimeMillis()
+        val event = IntakeEventItem(
+            receivedAt = now,
+            mcuTimestamp = mcuTimestamp,
+            rawEvent = rawEvent
+        )
+
+        val currentHistory = _intakeEventHistory.value.toMutableList()
+        currentHistory.add(0, event) // Add to beginning (newest first)
+
+        // Keep only the most recent MAX_HISTORY_SIZE items
+        if (currentHistory.size > MAX_HISTORY_SIZE) {
+            currentHistory.removeAt(currentHistory.size - 1)
+        }
+
+        _intakeEventHistory.value = currentHistory
+        logManager.d(TAG, "Added intake event to history: total=${currentHistory.size}")
     }
 
     sealed class ConnectionState {

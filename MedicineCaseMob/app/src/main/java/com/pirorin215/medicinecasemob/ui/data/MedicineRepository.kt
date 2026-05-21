@@ -7,6 +7,8 @@ class MedicineRepository(private val medicineDao: MedicineDao) {
     // Schedule operations
     fun getAllSchedules(): Flow<List<MedicineSchedule>> = medicineDao.getAllSchedules()
 
+    suspend fun getAllSchedulesSync(): List<MedicineSchedule> = medicineDao.getAllSchedulesSync()
+
     fun getScheduleById(id: Int): Flow<MedicineSchedule?> = medicineDao.getScheduleById(id)
 
     suspend fun insertSchedule(schedule: MedicineSchedule) = medicineDao.insertSchedule(schedule)
@@ -27,6 +29,12 @@ class MedicineRepository(private val medicineDao: MedicineDao) {
 
     suspend fun updateIntakeRecord(record: MedicineIntakeRecord) =
         medicineDao.updateIntakeRecord(record)
+
+    suspend fun deleteAllIntakeRecords() =
+        medicineDao.deleteAllIntakeRecords()
+
+    suspend fun deleteIntakeRecordsByIds(ids: List<Long>) =
+        medicineDao.deleteIntakeRecordsByIds(ids)
 
     suspend fun deleteOldRecords(thresholdDate: Long) =
         medicineDao.deleteOldRecords(thresholdDate)

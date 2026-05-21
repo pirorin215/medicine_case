@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -21,7 +22,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -30,6 +30,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -37,37 +40,28 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.pirorin215.medicinecasemob.ui.data.ScheduleType
-import com.pirorin215.medicinecasemob.ui.viewModel.SettingsViewModel
+import com.pirorin215.medicinecasemob.ui.viewModel.ScheduleSettingsViewModel
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(
+fun ScheduleSettingsScreen(
     onNavigateBack: () -> Unit,
-    viewModel: SettingsViewModel = hiltViewModel()
+    viewModel: ScheduleSettingsViewModel = hiltViewModel()
 ) {
-    val detectionSettings by viewModel.detectionSettings.collectAsState()
     val schedules by viewModel.schedules.collectAsState()
-    val isSaving by viewModel.isSaving.collectAsState()
-    val saveSuccess by viewModel.saveSuccess.collectAsState()
     val context = LocalContext.current
 
-    // Auto-clear success message after 5 seconds
-    LaunchedEffect(saveSuccess) {
-        if (saveSuccess != null) {
-            Log.d("SettingsScreen", "Showing message: $saveSuccess")
-            delay(5000)
-            viewModel.clearSaveSuccess()
-            Log.d("SettingsScreen", "Message cleared after 5 seconds")
-        }
-    }
+    var showTimeRangeDialog by remember { mutableStateOf(false) }
+    var timeRangeDialogSchedule by remember { mutableStateOf<ScheduleType?>(null) }
+    var timeRangeDialogState by remember { mutableStateOf<TimeRangeDialogState?>(null) }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("設定") },
+                title = { Text("アプリ設定") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "戻る")
@@ -84,26 +78,6 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Save success message
-            saveSuccess?.let { message ->
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (message.contains("失敗")) {
-                            MaterialTheme.colorScheme.errorContainer
-                        } else {
-                            MaterialTheme.colorScheme.primaryContainer
-                        }
-                    )
-                ) {
-                    Text(
-                        text = message,
-                        modifier = Modifier.padding(16.dp),
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                }
-            }
-
             // --- Schedule Settings ---
             Card(
                 modifier = Modifier.fillMaxWidth()
@@ -129,27 +103,32 @@ fun SettingsScreen(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    ScheduleType.values().forEach { type ->
+                    ScheduleType.entries.forEach { type ->
                         // Use DB data if available, otherwise use defaults
                         val schedule = schedules.find { it.id == type.id }
                         val enabled = schedule?.enabled ?: true
-                        val hour = schedule?.hour ?: type.defaultHour
-                        val minute = schedule?.minute ?: 0
+                        val startHour = schedule?.startHour ?: type.defaultStartHour
+                        val startMinute = schedule?.startMinute ?: type.defaultStartMinute
+                        val endHour = schedule?.endHour ?: type.defaultEndHour
+                        val endMinute = schedule?.endMinute ?: type.defaultEndMinute
 
                         ScheduleRow(
                             type = type,
                             enabled = enabled,
-                            hour = hour,
-                            minute = minute,
+                            startHour = startHour,
+                            startMinute = startMinute,
+                            endHour = endHour,
+                            endMinute = endMinute,
                             onEnabledChange = { viewModel.updateScheduleEnabled(type, it) },
                             onTimeClick = {
-                                TimePickerDialog(
-                                    context,
-                                    { _, h, m -> viewModel.updateScheduleTime(type, h, m) },
-                                    hour,
-                                    minute,
-                                    true
-                                ).show()
+                                timeRangeDialogSchedule = type
+                                timeRangeDialogState = TimeRangeDialogState(
+                                    startHour = startHour,
+                                    startMinute = startMinute,
+                                    endHour = endHour,
+                                    endMinute = endMinute
+                                )
+                                showTimeRangeDialog = true
                             }
                         )
 
@@ -157,89 +136,6 @@ fun SettingsScreen(
                             Spacer(modifier = Modifier.height(8.dp))
                         }
                     }
-                }
-            }
-
-            // --- Detection Settings ---
-            Card(
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp)
-                ) {
-                    Text(
-                        text = "服薬検知設定",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // Movement Threshold Slider
-                    detectionSettings?.let { settings ->
-                        Text(
-                            text = "検出角度: ${settings.movementThreshold.toInt()}°",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Text(
-                            text = "薬ケースを何度傾けたら服薬と判定するか",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Slider(
-                            value = settings.movementThreshold,
-                            onValueChange = { viewModel.updateMovementThreshold(it) },
-                            valueRange = 10f..180f,
-                            steps = 170
-                        )
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        // Cooldown Time Slider
-                        val cooldownSeconds = settings.cooldownTime / 1000
-                        Text(
-                            text = "クールダウン: ${cooldownSeconds.toInt()}秒",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Text(
-                            text = "服薬検知後、何秒間は次の検知を無視するか",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Slider(
-                            value = cooldownSeconds.toFloat(),
-                            onValueChange = { viewModel.updateCooldownTime((it * 1000).toLong()) },
-                            valueRange = 1f..300f,
-                            steps = 299
-                        )
-                    }
-                }
-            }
-
-            // Save Button
-            Button(
-                onClick = { viewModel.saveSettings() },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = !isSaving
-            ) {
-                if (isSaving) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.padding(end = 8.dp),
-                        color = MaterialTheme.colorScheme.onPrimary
-                    )
-                    Text("保存中...")
-                } else {
-                    Text("設定を保存")
                 }
             }
 
@@ -262,10 +158,9 @@ fun SettingsScreen(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "• スケジュール: 服薬時刻を設定し、通知を受け取れます\n" +
-                              "• 検出角度: 小さくすると少しの傾きでも検知されます（10-180度）\n" +
-                              "• クールダウン: 連続検知を防ぐための待機時間（1-300秒）\n" +
-                              "• 検知設定はマイコンとスマホの両方に保存されます",
+                        text = "• スケジュール: 時間帯を設定して服薬記録を管理\n" +
+                              "• 各時間帯で開始時刻と終了時刻を設定可能\n" +
+                              "• 通知は終了時刻に送信されます",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -273,14 +168,29 @@ fun SettingsScreen(
             }
         }
     }
+
+    // Time range dialog
+    if (showTimeRangeDialog && timeRangeDialogSchedule != null && timeRangeDialogState != null) {
+        TimeRangeDialog(
+            schedule = timeRangeDialogSchedule!!,
+            state = timeRangeDialogState!!,
+            onDismiss = { showTimeRangeDialog = false },
+            onConfirm = { startH, startM, endH, endM ->
+                viewModel.updateScheduleTimeRange(timeRangeDialogSchedule!!, startH, startM, endH, endM)
+                showTimeRangeDialog = false
+            }
+        )
+    }
 }
 
 @Composable
 private fun ScheduleRow(
     type: ScheduleType,
     enabled: Boolean,
-    hour: Int,
-    minute: Int,
+    startHour: Int,
+    startMinute: Int,
+    endHour: Int,
+    endMinute: Int,
     onEnabledChange: (Boolean) -> Unit,
     onTimeClick: () -> Unit
 ) {
@@ -305,13 +215,13 @@ private fun ScheduleRow(
             )
         }
 
-        // Time picker button
+        // Time range button
         TextButton(
             onClick = onTimeClick,
             enabled = enabled
         ) {
             Text(
-                text = String.format("%02d:%02d", hour, minute),
+                text = "%02d:%02d 〜 %02d:%02d".format(startHour, startMinute, endHour, endMinute),
                 style = MaterialTheme.typography.titleMedium,
                 color = if (enabled) {
                     MaterialTheme.colorScheme.primary
@@ -322,3 +232,106 @@ private fun ScheduleRow(
         }
     }
 }
+
+@Composable
+private fun TimeRangeDialog(
+    schedule: ScheduleType,
+    state: TimeRangeDialogState,
+    onDismiss: () -> Unit,
+    onConfirm: (Int, Int, Int, Int) -> Unit
+) {
+    var tempStartHour by remember { mutableStateOf(state.startHour) }
+    var tempStartMinute by remember { mutableStateOf(state.startMinute) }
+    var tempEndHour by remember { mutableStateOf(state.endHour) }
+    var tempEndMinute by remember { mutableStateOf(state.endMinute) }
+
+    val context = LocalContext.current
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("${schedule.displayName}の時間帯を設定") },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Start time
+                Text(
+                    text = "開始時刻",
+                    style = MaterialTheme.typography.titleSmall
+                )
+                Button(
+                    onClick = {
+                        TimePickerDialog(
+                            context,
+                            { _, h, m ->
+                                tempStartHour = h
+                                tempStartMinute = m
+                            },
+                            tempStartHour,
+                            tempStartMinute,
+                            true
+                        ).show()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("%02d:%02d".format(tempStartHour, tempStartMinute))
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // End time
+                Text(
+                    text = "終了時刻",
+                    style = MaterialTheme.typography.titleSmall
+                )
+                Button(
+                    onClick = {
+                        TimePickerDialog(
+                            context,
+                            { _, h, m ->
+                                tempEndHour = h
+                                tempEndMinute = m
+                            },
+                            tempEndHour,
+                            tempEndMinute,
+                            true
+                        ).show()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("%02d:%02d".format(tempEndHour, tempEndMinute))
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    // Validate: end time must be after start time
+                    val startMinutes = tempStartHour * 60 + tempStartMinute
+                    val endMinutes = tempEndHour * 60 + tempEndMinute
+
+                    if (endMinutes > startMinutes) {
+                        onConfirm(tempStartHour, tempStartMinute, tempEndHour, tempEndMinute)
+                    } else {
+                        Log.e("ScheduleSettingsScreen", "Invalid time range: end must be after start")
+                    }
+                }
+            ) {
+                Text("OK")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("キャンセル")
+            }
+        }
+    )
+}
+
+data class TimeRangeDialogState(
+    val startHour: Int,
+    val startMinute: Int,
+    val endHour: Int,
+    val endMinute: Int
+)
