@@ -22,6 +22,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -51,12 +52,16 @@ fun ScheduleSettingsScreen(
     onNavigateBack: () -> Unit,
     viewModel: ScheduleSettingsViewModel = hiltViewModel()
 ) {
-    val schedules by viewModel.schedules.collectAsState()
+    val schedules by viewModel.schedules.collectAsState(initial = emptyList())
+    val onlyNotifyWhenBleConnected by viewModel.onlyNotifyWhenBleConnected.collectAsState(initial = false)
+    val notificationIntervalMinutes by viewModel.notificationIntervalMinutes.collectAsState(initial = 60)
+    val uiFontSizeScale by viewModel.uiFontSizeScale.collectAsState()
     val context = LocalContext.current
 
     var showTimeRangeDialog by remember { mutableStateOf(false) }
     var timeRangeDialogSchedule by remember { mutableStateOf<ScheduleType?>(null) }
     var timeRangeDialogState by remember { mutableStateOf<TimeRangeDialogState?>(null) }
+    var showNotificationIntervalDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -119,6 +124,8 @@ fun ScheduleSettingsScreen(
                             startMinute = startMinute,
                             endHour = endHour,
                             endMinute = endMinute,
+                            reminderHour = schedule?.reminderHour ?: type.defaultStartHour + 1, // Default to 1 hour after start
+                            reminderMinute = schedule?.reminderMinute ?: type.defaultStartMinute,
                             onEnabledChange = { viewModel.updateScheduleEnabled(type, it) },
                             onTimeClick = {
                                 timeRangeDialogSchedule = type
@@ -129,6 +136,9 @@ fun ScheduleSettingsScreen(
                                     endMinute = endMinute
                                 )
                                 showTimeRangeDialog = true
+                            },
+                            onReminderTimeChange = { h, m ->
+                                viewModel.updateScheduleReminderTime(type, h, m)
                             }
                         )
 
@@ -139,7 +149,121 @@ fun ScheduleSettingsScreen(
                 }
             }
 
-            // Info Card
+
+            // --- Notification Settings ---
+            Card(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                ) {
+                    Text(
+                        text = "通知設定",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "BLE接続時のみ通知",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "ケースと接続できない時は通知を抑制します",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = onlyNotifyWhenBleConnected,
+                            onCheckedChange = { viewModel.updateOnlyNotifyWhenBleConnected(it) }
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "通知リマインダー間隔",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "服薬忘れのリマインダー通知の間隔を設定します",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        TextButton(
+                            onClick = { showNotificationIntervalDialog = true }
+                        ) {
+                            Text(
+                                text = "${notificationIntervalMinutes}分",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                    }
+                    }
+
+
+                    // --- UI Settings ---
+                    Card(
+                    modifier = Modifier.fillMaxWidth()
+                    ) {
+                    Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                    ) {
+                    Text(
+                        text = "表示設定",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = "文字サイズ: ${String.format("%.1f", uiFontSizeScale)}倍",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = "画面全体の文字サイズを調整します（デフォルト1.2倍）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Slider(
+                        value = uiFontSizeScale,
+                        onValueChange = { viewModel.updateUiFontSizeScale(it) },
+                        valueRange = 0.8f..2.0f,
+                        steps = 11 // 0.1 increments
+                    )
+                    }
+                    }
+
+
+                    // Info Card
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
@@ -169,6 +293,18 @@ fun ScheduleSettingsScreen(
         }
     }
 
+    // Notification interval dialog
+    if (showNotificationIntervalDialog) {
+        NotificationIntervalDialog(
+            currentMinutes = notificationIntervalMinutes,
+            onDismiss = { showNotificationIntervalDialog = false },
+            onConfirm = { minutes ->
+                viewModel.updateNotificationIntervalMinutes(minutes)
+                showNotificationIntervalDialog = false
+            }
+        )
+    }
+
     // Time range dialog
     if (showTimeRangeDialog && timeRangeDialogSchedule != null && timeRangeDialogState != null) {
         TimeRangeDialog(
@@ -191,44 +327,82 @@ private fun ScheduleRow(
     startMinute: Int,
     endHour: Int,
     endMinute: Int,
+    reminderHour: Int,
+    reminderMinute: Int,
     onEnabledChange: (Boolean) -> Unit,
-    onTimeClick: () -> Unit
+    onTimeClick: () -> Unit,
+    onReminderTimeChange: (Int, Int) -> Unit
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // Schedule name and switch
+    val context = LocalContext.current
+    Column(modifier = Modifier.fillMaxWidth()) {
         Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Switch(
-                checked = enabled,
-                onCheckedChange = onEnabledChange
-            )
-            Text(
-                text = type.displayName,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Medium
-            )
-        }
+            // Schedule name and switch
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Switch(
+                    checked = enabled,
+                    onCheckedChange = onEnabledChange
+                )
+                Text(
+                    text = type.displayName,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium
+                )
+            }
 
-        // Time range button
-        TextButton(
-            onClick = onTimeClick,
-            enabled = enabled
-        ) {
-            Text(
-                text = "%02d:%02d 〜 %02d:%02d".format(startHour, startMinute, endHour, endMinute),
-                style = MaterialTheme.typography.titleMedium,
-                color = if (enabled) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+            // Time range button
+            TextButton(
+                onClick = onTimeClick,
+                enabled = enabled
+            ) {
+                Text(
+                    text = "%02d:%02d 〜 %02d:%02d".format(startHour, startMinute, endHour, endMinute),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = if (enabled) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                    }
+                )
+            }
+        }
+        
+        if (enabled) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 48.dp), // Align with the text after switch
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.End
+            ) {
+                Text(
+                    text = "通知推奨時刻:",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                TextButton(
+                    onClick = {
+                        TimePickerDialog(
+                            context,
+                            { _, h, m -> onReminderTimeChange(h, m) },
+                            reminderHour,
+                            reminderMinute,
+                            true
+                        ).show()
+                    }
+                ) {
+                    Text(
+                        text = "%02d:%02d".format(reminderHour, reminderMinute),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
                 }
-            )
+            }
         }
     }
 }
@@ -317,6 +491,78 @@ private fun TimeRangeDialog(
                         Log.e("ScheduleSettingsScreen", "Invalid time range: end must be after start")
                     }
                 }
+            ) {
+                Text("OK")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("キャンセル")
+            }
+        }
+    )
+}
+
+@Composable
+private fun NotificationIntervalDialog(
+    currentMinutes: Int,
+    onDismiss: () -> Unit,
+    onConfirm: (Int) -> Unit
+) {
+    var tempMinutes by remember { mutableStateOf(currentMinutes) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("通知リマインダー間隔を設定") },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "リマインダー通知の間隔（分）を設定してください",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "間隔（分）",
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = { if (tempMinutes > 1) tempMinutes-- },
+                            enabled = tempMinutes > 1
+                        ) {
+                            Text("-")
+                        }
+                        Text(
+                            text = "$tempMinutes",
+                            style = MaterialTheme.typography.titleLarge
+                        )
+                        Button(
+                            onClick = { if (tempMinutes < 1440) tempMinutes++ },
+                            enabled = tempMinutes < 1440
+                        ) {
+                            Text("+")
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(tempMinutes) }
             ) {
                 Text("OK")
             }

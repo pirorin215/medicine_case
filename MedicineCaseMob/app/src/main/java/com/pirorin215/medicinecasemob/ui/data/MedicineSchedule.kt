@@ -1,17 +1,14 @@
 package com.pirorin215.medicinecasemob.ui.data
 
-import androidx.room.Entity
-import androidx.room.PrimaryKey
-
-@Entity(tableName = "schedules")
 data class MedicineSchedule(
-    @PrimaryKey
     val id: Int,  // 0: Morning, 1: Afternoon, 2: Evening
     val enabled: Boolean,
     val startHour: Int,
     val startMinute: Int,
     val endHour: Int,
-    val endMinute: Int
+    val endMinute: Int,
+    val reminderHour: Int,
+    val reminderMinute: Int
 )
 
 enum class ScheduleType(val id: Int, val displayName: String, val defaultStartHour: Int, val defaultStartMinute: Int, val defaultEndHour: Int, val defaultEndMinute: Int) {

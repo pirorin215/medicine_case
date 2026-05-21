@@ -9,6 +9,7 @@ import com.pirorin215.medicinecasemob.ui.data.MedicineIntakeRecord
 import com.pirorin215.medicinecasemob.ui.data.MedicineSchedule
 import com.pirorin215.medicinecasemob.ui.data.ScheduleType
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.first
 import java.util.Calendar
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -16,11 +17,13 @@ import javax.inject.Singleton
 @Singleton
 class NotificationService @Inject constructor(
     private val logManager: com.pirorin215.medicinecasemob.util.LogManager,
+    private val repository: com.pirorin215.medicinecasemob.ui.data.MedicineRepository,
     @ApplicationContext private val context: Context
 ) {
     companion object {
         private const val TAG = "NotificationService"
         private const val CHANNEL_ID = "medicine_reminder"
+        private const val DEFAULT_NOTIFICATION_INTERVAL_MINUTES = 60
     }
 
     /**
@@ -31,7 +34,7 @@ class NotificationService @Inject constructor(
      * @param isConnectedToBle Whether BLE is connected to the device
      * @param forceNotification If true, send notification immediately (used when BLE connects)
      */
-    fun checkAndNotifyMissedIntakes(
+    suspend fun checkAndNotifyMissedIntakes(
         schedules: List<MedicineSchedule>,
         todayRecord: MedicineIntakeRecord?,
         isConnectedToBle: Boolean,
@@ -41,18 +44,30 @@ class NotificationService @Inject constructor(
         val currentHour = calendar.get(Calendar.HOUR_OF_DAY)
         val currentMinute = calendar.get(Calendar.MINUTE)
         val currentMinutes = currentHour * 60 + currentMinute
+        val currentTimeSeconds = (System.currentTimeMillis() / 1000).toInt()
 
-        logManager.d(TAG, "checkAndNotifyMissedIntakes: currentTime=$currentHour:$currentMinute, force=$forceNotification, bleConnected=$isConnectedToBle")
+        // Load notification settings from repository
+        val appSettings = repository.settingsFlow.first()
+        val onlyNotifyWhenBle = appSettings.onlyNotifyWhenBleConnected
+        val lastNotificationTime = appSettings.lastNotificationTimestamp
+        val notificationIntervalMinutes = appSettings.notificationIntervalMinutes
 
-        // Sort schedules by end time
-        val sortedSchedules = schedules.sortedBy { it.endHour * 60 + it.endMinute }
+        val secondsSinceLastNotification = currentTimeSeconds - lastNotificationTime
 
-        for (schedule in sortedSchedules) {
-            if (!schedule.enabled) continue
+        // 1. Get all enabled schedules sorted by end time (descending)
+        val enabledSchedules = schedules.filter { it.enabled }.sortedByDescending { it.endHour * 60 + it.endMinute }
 
-            val endMinutes = schedule.endHour * 60 + schedule.endMinute
-            val scheduleType = ScheduleType.fromId(schedule.id) ?: continue
+        // --- NEW: In-slot (Intelligent) Notification Logic ---
+        // Find if we are currently WITHIN an active slot
+        val currentSlot = enabledSchedules.find {
+            val startMinutes = it.startHour * 60 + it.startMinute
+            val endMinutes = it.endHour * 60 + it.endMinute
+            currentMinutes in startMinutes until endMinutes
+        }
 
+        if (currentSlot != null) {
+            val scheduleType = ScheduleType.fromId(currentSlot.id) ?: return
+            
             // Check if already taken
             val alreadyTaken = when (scheduleType) {
                 ScheduleType.MORNING -> todayRecord?.morningTaken == true
@@ -60,89 +75,150 @@ class NotificationService @Inject constructor(
                 ScheduleType.EVENING -> todayRecord?.eveningTaken == true
             }
 
-            if (alreadyTaken) {
-                logManager.d(TAG, "Schedule $scheduleType already taken, skipping")
-                continue
-            }
+            if (!alreadyTaken) {
+                val alreadyNotifiedInSlot = when (scheduleType) {
+                    ScheduleType.MORNING -> appSettings.notifiedInSlotMorning
+                    ScheduleType.AFTERNOON -> appSettings.notifiedInSlotAfternoon
+                    ScheduleType.EVENING -> appSettings.notifiedInSlotEvening
+                }
 
-            // Determine if we should notify now
-            val shouldNotify = if (forceNotification && isConnectedToBle) {
-                // BLE connected: notify immediately for any missed intake
-                logManager.d(TAG, "BLE connected, checking if $scheduleType is missed")
-                currentMinutes >= endMinutes
-            } else {
-                // Scheduled check: notify at end time or 30-min intervals
-                val timeSinceEnd = currentMinutes - endMinutes
+                if (!alreadyNotifiedInSlot) {
+                    // Check triggers: BLE connect (force) OR Preferred Time reached
+                    val preferredHour = when (scheduleType) {
+                        ScheduleType.MORNING -> appSettings.morningReminderHour
+                        ScheduleType.AFTERNOON -> appSettings.afternoonReminderHour
+                        ScheduleType.EVENING -> appSettings.eveningReminderHour
+                    }
+                    val preferredMinute = when (scheduleType) {
+                        ScheduleType.MORNING -> appSettings.morningReminderMinute
+                        ScheduleType.AFTERNOON -> appSettings.afternoonReminderMinute
+                        ScheduleType.EVENING -> appSettings.eveningReminderMinute
+                    }
+                    val preferredMinutes = preferredHour * 60 + preferredMinute
 
-                if (timeSinceEnd < 0) {
-                    // Not yet reached end time
-                    logManager.d(TAG, "Schedule $scheduleType: end time not reached yet")
-                    false
-                } else {
-                    // Calculate which notification this would be
-                    val timeSinceEndLong = timeSinceEnd.toLong()
-                    val notificationNumber = (timeSinceEndLong / 30L).toInt() + 1
-
-                    // Get next schedule's start time (if any)
-                    val currentScheduleIndex = sortedSchedules.indexOf(schedule)
-                    val nextSchedule = if (currentScheduleIndex < sortedSchedules.size - 1) {
-                        sortedSchedules[currentScheduleIndex + 1]
-                    } else {
-                        null
+                    var shouldNotifyInSlot = false
+                    if (forceNotification) {
+                        shouldNotifyInSlot = true
+                        logManager.d(TAG, "In-slot notification triggered: BLE connected (force)")
+                    } else if (currentMinutes >= preferredMinutes) {
+                        shouldNotifyInSlot = true
+                        logManager.d(TAG, "In-slot notification triggered: Preferred time reached ($preferredHour:$preferredMinute)")
                     }
 
-                    val nextStartMinutes = nextSchedule?.let {
-                        if (it.enabled) it.startHour * 60 + it.startMinute else null
-                    }
-
-                    // Check if we should notify
-                    val shouldNotifyScheduled = if (notificationNumber == 1) {
-                        // First notification: at end time
-                        timeSinceEndLong == 0L
-                    } else {
-                        // Subsequent notifications: every 30 minutes
-                        // BUT only if BLE was connected at some point (otherwise skip after 1st)
-                        // This is handled by checking timeSinceEnd % 30 == 0
-                        timeSinceEndLong % 30L == 0L
-                    }
-
-                    // Stop notifications if next schedule is about to start
-                    val shouldStop = nextStartMinutes != null &&
-                        (currentMinutes + 30) >= nextStartMinutes
-
-                    if (shouldStop) {
-                        logManager.d(TAG, "Schedule $scheduleType: next schedule starting soon, stopping notifications")
-                        false
-                    } else {
-                        shouldNotifyScheduled
+                    if (shouldNotifyInSlot) {
+                        sendNotification(scheduleType, isInSlot = true)
+                        
+                        // Update in-slot notification flag
+                        when (scheduleType) {
+                            ScheduleType.MORNING -> repository.updateInSlotNotificationFlags(morning = true, afternoon = appSettings.notifiedInSlotAfternoon, evening = appSettings.notifiedInSlotEvening)
+                            ScheduleType.AFTERNOON -> repository.updateInSlotNotificationFlags(morning = appSettings.notifiedInSlotMorning, afternoon = true, evening = appSettings.notifiedInSlotEvening)
+                            ScheduleType.EVENING -> repository.updateInSlotNotificationFlags(morning = appSettings.notifiedInSlotMorning, afternoon = appSettings.notifiedInSlotAfternoon, evening = true)
+                        }
+                        repository.updateLastNotificationTimestamp(currentTimeSeconds.toLong())
+                        return // Exit after sending in-slot notification
                     }
                 }
             }
+        }
 
-            if (shouldNotify) {
-                // Check if this is the 2nd+ notification and BLE is not connected
-                val timeSinceEnd = currentMinutes - endMinutes
-                val isSecondOrLater = timeSinceEnd > 0
+        // --- EXISTING: End-of-slot (Deadline) Notification Logic ---
+        // 2. Find the latest ended schedule to check
+        val latestEndedSchedule = enabledSchedules
+            .filter { currentMinutes >= (it.endHour * 60 + it.endMinute) }
+            .maxByOrNull { it.endHour * 60 + it.endMinute }
 
-                if (isSecondOrLater && !isConnectedToBle) {
-                    logManager.d(TAG, "Schedule $scheduleType: skipping 2nd+ notification (BLE not connected)")
-                    continue
-                }
+        if (latestEndedSchedule == null) return
 
-                // Send notification
-                sendNotification(scheduleType)
-                logManager.d(TAG, "Notification sent for $scheduleType at $currentHour:$currentMinute")
+        val scheduleType = ScheduleType.fromId(latestEndedSchedule.id) ?: return
+
+        // 3. Check if already taken
+        val alreadyTaken = when (scheduleType) {
+            ScheduleType.MORNING -> todayRecord?.morningTaken == true
+            ScheduleType.AFTERNOON -> todayRecord?.afternoonTaken == true
+            ScheduleType.EVENING -> todayRecord?.eveningTaken == true
+        }
+
+        if (alreadyTaken) {
+            logManager.d(TAG, "Schedule $scheduleType already taken. No notification.")
+            return
+        }
+
+        // 4. Check if we should notify now
+        val alreadyNotifiedAtEnd = when (scheduleType) {
+            ScheduleType.MORNING -> appSettings.notifiedAtEndOfMorning
+            ScheduleType.AFTERNOON -> appSettings.notifiedAtEndOfAfternoon
+            ScheduleType.EVENING -> appSettings.notifiedAtEndOfEvening
+        }
+
+        var shouldNotify = false
+
+        if (forceNotification) {
+            // Force notification (e.g. on BLE connect) - always notify if not taken
+            shouldNotify = true
+            logManager.d(TAG, "Decided to notify: Force notification")
+        } else if (!alreadyNotifiedAtEnd) {
+            // First notification for this slot's end time
+            // We check BLE requirement here
+            if (!onlyNotifyWhenBle || isConnectedToBle) {
+                shouldNotify = true
+                logManager.d(TAG, "Decided to notify: First notification for slot end")
             }
+        } else {
+            // Already notified once, check if it's time for a reminder
+            if (secondsSinceLastNotification >= notificationIntervalMinutes * 60) {
+                // Reminder interval passed
+                // IMPORTANT: Reminders only happen if BLE is connected (Spec 2.2)
+                // This prevents annoying reminders when the case is not nearby.
+                if (isConnectedToBle) {
+                    shouldNotify = true
+                    logManager.d(TAG, "Decided to notify: Reminder interval passed and BLE connected")
+                }
+            }
+        }
+
+        if (shouldNotify) {
+            // Send notification
+            sendNotification(scheduleType, isInSlot = false)
+            logManager.d(TAG, "Notification sent for $scheduleType at $currentHour:$currentMinute")
+
+            // Update flags
+            if (!forceNotification) {
+                when (scheduleType) {
+                    ScheduleType.MORNING -> repository.updateEndNotificationFlags(
+                        morning = true,
+                        afternoon = appSettings.notifiedAtEndOfAfternoon,
+                        evening = appSettings.notifiedAtEndOfEvening
+                    )
+                    ScheduleType.AFTERNOON -> repository.updateEndNotificationFlags(
+                        morning = appSettings.notifiedAtEndOfMorning,
+                        afternoon = true,
+                        evening = appSettings.notifiedAtEndOfEvening
+                    )
+                    ScheduleType.EVENING -> repository.updateEndNotificationFlags(
+                        morning = appSettings.notifiedAtEndOfMorning,
+                        afternoon = appSettings.notifiedAtEndOfAfternoon,
+                        evening = true
+                    )
+                }
+            }
+
+            // Update last notification timestamp
+            repository.updateLastNotificationTimestamp(currentTimeSeconds.toLong())
+        } else {
+            logManager.d(TAG, "Decided NOT to notify: interval not met or BLE requirements not met. lastNotif=$lastNotificationTime, diffSec=$secondsSinceLastNotification")
         }
     }
 
-    private fun sendNotification(scheduleType: ScheduleType) {
+    private fun sendNotification(scheduleType: ScheduleType, isInSlot: Boolean) {
         val notificationId = scheduleType.id * 1000 + Calendar.getInstance().get(Calendar.DAY_OF_YEAR)
+
+        val title = if (isInSlot) "服薬の時間です" else "${scheduleType.displayName}の服薬がまだです"
+        val text = if (isInSlot) "${scheduleType.displayName}の薬を飲む時間になりました。" else "お薬を忘れずに服用してください。"
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle("${scheduleType.displayName}の服薬がまだです")
-            .setContentText("お薬を忘れずに服用してください")
+            .setContentTitle(title)
+            .setContentText(text)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setAutoCancel(true)
             .build()

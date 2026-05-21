@@ -10,8 +10,11 @@ data class MedicineIntakeRecord(
     val date: Long,  // Unix timestamp (day precision)
     val morningTaken: Boolean = false,
     val morningTime: Long = 0L,
+    val morningEnabled: Boolean = true,
     val afternoonTaken: Boolean = false,
     val afternoonTime: Long = 0L,
+    val afternoonEnabled: Boolean = true,
     val eveningTaken: Boolean = false,
-    val eveningTime: Long = 0L
+    val eveningTime: Long = 0L,
+    val eveningEnabled: Boolean = true
 )

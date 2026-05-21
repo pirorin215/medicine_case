@@ -9,22 +9,6 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface MedicineDao {
-    // Schedule operations
-    @Query("SELECT * FROM schedules")
-    fun getAllSchedules(): Flow<List<MedicineSchedule>>
-
-    @Query("SELECT * FROM schedules")
-    suspend fun getAllSchedulesSync(): List<MedicineSchedule>
-
-    @Query("SELECT * FROM schedules WHERE id = :id")
-    fun getScheduleById(id: Int): Flow<MedicineSchedule?>
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertSchedule(schedule: MedicineSchedule)
-
-    @Update
-    suspend fun updateSchedule(schedule: MedicineSchedule)
-
     // Intake record operations
     @Query("SELECT * FROM intake_records ORDER BY date DESC")
     fun getAllIntakeRecords(): Flow<List<MedicineIntakeRecord>>
@@ -49,14 +33,4 @@ interface MedicineDao {
 
     @Query("DELETE FROM intake_records WHERE date < :thresholdDate")
     suspend fun deleteOldRecords(thresholdDate: Long)
-
-    // Detection settings operations
-    @Query("SELECT * FROM detection_settings WHERE id = 1")
-    fun getDetectionSettings(): Flow<DetectionSettings?>
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertDetectionSettings(settings: DetectionSettings)
-
-    @Update
-    suspend fun updateDetectionSettings(settings: DetectionSettings)
 }

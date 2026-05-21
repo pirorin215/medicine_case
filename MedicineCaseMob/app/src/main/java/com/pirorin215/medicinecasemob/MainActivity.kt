@@ -90,8 +90,6 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-    private val viewModel: MainViewModel by viewModels()
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         logManager.d(TAG, "onCreate called")
@@ -120,7 +118,10 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            MedicineCaseMobTheme {
+            val viewModel: com.pirorin215.medicinecasemob.ui.viewModel.MainViewModel = hiltViewModel()
+            val settings by viewModel.settings.collectAsState(initial = null)
+
+            MedicineCaseMobTheme(fontSizeScale = settings?.uiFontSizeScale ?: 1.2f) {
                 MedicineNavGraph()
             }
         }

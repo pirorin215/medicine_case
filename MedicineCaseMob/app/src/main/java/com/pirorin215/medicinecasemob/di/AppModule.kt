@@ -5,7 +5,6 @@ import com.pirorin215.medicinecasemob.ble.BleManager
 import com.pirorin215.medicinecasemob.ui.data.MedicineDatabase
 import com.pirorin215.medicinecasemob.ui.data.MedicineDao
 import com.pirorin215.medicinecasemob.ui.data.MedicineRepository
-import com.pirorin215.medicinecasemob.ui.data.MedicineSettingsRepository
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -39,8 +38,19 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideMedicineRepository(dao: MedicineDao): MedicineRepository {
-        return MedicineRepository(dao)
+    fun providePreferenceManager(
+        @ApplicationContext context: Context
+    ): com.pirorin215.medicinecasemob.ui.data.PreferenceManager {
+        return com.pirorin215.medicinecasemob.ui.data.PreferenceManager(context)
+    }
+
+    @Provides
+    @Singleton
+    fun provideMedicineRepository(
+        dao: MedicineDao,
+        preferenceManager: com.pirorin215.medicinecasemob.ui.data.PreferenceManager
+    ): MedicineRepository {
+        return MedicineRepository(dao, preferenceManager)
     }
 
     @Provides
@@ -49,13 +59,5 @@ object AppModule {
         @ApplicationContext context: Context
     ): BleManager {
         return BleManager(com.pirorin215.medicinecasemob.util.LogManager.getInstance(), context)
-    }
-
-    @Provides
-    @Singleton
-    fun provideMedicineSettingsRepository(
-        @ApplicationContext context: Context
-    ): MedicineSettingsRepository {
-        return MedicineSettingsRepository(context)
     }
 }

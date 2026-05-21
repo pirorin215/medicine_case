@@ -90,8 +90,8 @@ class DebugViewModel @Inject constructor(
 
     private fun loadSchedules() {
         viewModelScope.launch {
-            repository.getAllSchedules().collect { scheduleList ->
-                _schedules.value = scheduleList
+            repository.settingsFlow.collect { settings ->
+                _schedules.value = repository.getSchedulesFromSettings(settings)
             }
         }
     }

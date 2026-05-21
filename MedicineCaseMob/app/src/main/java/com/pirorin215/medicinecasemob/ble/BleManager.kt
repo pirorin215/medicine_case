@@ -277,8 +277,6 @@ class BleManager @Inject constructor(
             return
         }
 
-        logManager.d(TAG, "Starting BLE scan...")
-
         // First, try to find bonded devices
         val bondedDevices = bluetoothAdapter?.bondedDevices
         val bondedMedicineCase = bondedDevices?.find { it.name?.startsWith(DEVICE_NAME_PREFIX) == true }

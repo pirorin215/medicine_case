@@ -31,6 +31,7 @@ private val LightColorScheme = lightColorScheme(
 fun MedicineCaseMobTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     dynamicColor: Boolean = true,
+    fontSizeScale: Float = 1.0f,
     content: @Composable () -> Unit
 ) {
     val colorScheme = when {
@@ -50,7 +51,7 @@ fun MedicineCaseMobTheme(
 
     MaterialTheme(
         colorScheme = colorScheme,
-        typography = Typography,
+        typography = getScaledTypography(fontSizeScale),
         content = content
     )
 }

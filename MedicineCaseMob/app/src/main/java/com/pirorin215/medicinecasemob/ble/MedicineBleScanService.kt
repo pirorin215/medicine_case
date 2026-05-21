@@ -22,8 +22,12 @@ import com.pirorin215.medicinecasemob.util.LogManager
 import androidx.core.app.NotificationCompat
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.flow.first
 import com.pirorin215.medicinecasemob.MainActivity
 import com.pirorin215.medicinecasemob.R
+import com.pirorin215.medicinecasemob.notification.NotificationService
+import com.pirorin215.medicinecasemob.ui.data.MedicineRepository
+import java.util.Calendar
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -51,7 +55,15 @@ class MedicineBleScanService : Service() {
     @Inject
     lateinit var bleManager: BleManager
 
+    @Inject
+    lateinit var repository: MedicineRepository
+
+    @Inject
+    lateinit var notificationService: NotificationService
+
+
     private var scanJob: Job? = null
+    private val serviceScope = CoroutineScope(Dispatchers.IO + Job())
 
     inner class LocalBinder : Binder() {
         fun getService(): MedicineBleScanService = this@MedicineBleScanService
@@ -75,8 +87,138 @@ class MedicineBleScanService : Service() {
         val filter = IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
         registerReceiver(bluetoothStateReceiver, filter)
 
+        // Start background observers
+        observeBleEvents()
+
         // Start continuous scanning
         startContinuousScanning()
+    }
+
+    private fun observeBleEvents() {
+        // Observe connection state for sync/notify on connect
+        serviceScope.launch {
+            bleManager.connectionState.collect { state ->
+                if (state is BleManager.ConnectionState.Connected) {
+                    logManager.d(TAG, "Connected event observed in Service - syncing")
+                    bleManager.syncTime()
+                    bleManager.getIntake()
+
+                    // Check for missed intakes and notify immediately
+                    checkAndNotify(forceNotification = true)
+                }
+            }
+        }
+
+        // Observe intake events for recording
+        serviceScope.launch {
+            bleManager.intakeEvent.collect { event ->
+                if (event == null) return@collect
+
+                logManager.d(TAG, "Processing intake event in Service: $event")
+
+                if (event.startsWith("INTAKE:")) {
+                    val timestampStr = event.removePrefix("INTAKE:")
+                    val timestamp = timestampStr.toLongOrNull()
+
+                    if (timestamp != null && timestamp > 0) {
+                        recordIntakeLocally(timestamp)
+                        // Clear intake timestamp on firmware
+                        bleManager.clearIntake()
+                    }
+                }
+
+                // Consume and clear debug timestamps
+                bleManager.consumeIntakeEvent()
+                bleManager.clearLastIntakeTimestamp()
+            }
+        }
+    }
+
+    private suspend fun recordIntakeLocally(mcuTimestamp: Long) {
+        val phoneTimestamp = System.currentTimeMillis() / 1000
+
+        // Ensure today's record exists and get it
+        val todayRecord = repository.ensureTodayRecordExists()
+
+        // Determine period
+        val settings = repository.settingsFlow.first()
+        val schedules = repository.getSchedulesFromSettings(settings)
+        var scheduleType = determineScheduleTypeForTimestamp(phoneTimestamp, schedules)
+
+        if (scheduleType == null) {
+            scheduleType = determineScheduleTypeAfterNotification(phoneTimestamp, schedules, settings)
+        }
+
+        if (scheduleType == null) {
+            logManager.d(TAG, "Ignoring intake: no valid schedule for current time")
+            return
+        }
+
+        // Check already taken
+        val alreadyTaken = when (scheduleType) {
+            com.pirorin215.medicinecasemob.ui.data.ScheduleType.MORNING -> todayRecord.morningTaken
+            com.pirorin215.medicinecasemob.ui.data.ScheduleType.AFTERNOON -> todayRecord.afternoonTaken
+            com.pirorin215.medicinecasemob.ui.data.ScheduleType.EVENING -> todayRecord.eveningTaken
+        }
+
+        if (alreadyTaken) {
+            logManager.d(TAG, "Ignoring intake: already recorded for $scheduleType")
+            return
+        }
+
+        // Record (the record is guaranteed to exist now)
+        val updatedRecord = when (scheduleType) {
+            com.pirorin215.medicinecasemob.ui.data.ScheduleType.MORNING -> todayRecord.copy(morningTaken = true, morningTime = phoneTimestamp)
+            com.pirorin215.medicinecasemob.ui.data.ScheduleType.AFTERNOON -> todayRecord.copy(afternoonTaken = true, afternoonTime = phoneTimestamp)
+            com.pirorin215.medicinecasemob.ui.data.ScheduleType.EVENING -> todayRecord.copy(eveningTaken = true, eveningTime = phoneTimestamp)
+        }
+
+        repository.insertIntakeRecord(updatedRecord)
+        logManager.d(TAG, "Intake recorded: $scheduleType at phoneTime=$phoneTimestamp")
+    }
+
+    private fun determineScheduleTypeForTimestamp(
+        timestamp: Long,
+        schedules: List<com.pirorin215.medicinecasemob.ui.data.MedicineSchedule>
+    ): com.pirorin215.medicinecasemob.ui.data.ScheduleType? {
+        val cal = Calendar.getInstance()
+        cal.timeInMillis = timestamp * 1000
+        val hour = cal.get(Calendar.HOUR_OF_DAY)
+        val minute = cal.get(Calendar.MINUTE)
+        val currentMinutes = hour * 60 + minute
+
+        for (schedule in schedules) {
+            if (!schedule.enabled) continue
+            val startMinutes = schedule.startHour * 60 + schedule.startMinute
+            val endMinutes = schedule.endHour * 60 + schedule.endMinute
+            if (currentMinutes in startMinutes..endMinutes) {
+                return com.pirorin215.medicinecasemob.ui.data.ScheduleType.fromId(schedule.id)
+            }
+        }
+        return null
+    }
+
+    private fun determineScheduleTypeAfterNotification(
+        timestamp: Long,
+        schedules: List<com.pirorin215.medicinecasemob.ui.data.MedicineSchedule>,
+        settings: com.pirorin215.medicinecasemob.ui.data.AppSettingsData
+    ): com.pirorin215.medicinecasemob.ui.data.ScheduleType? {
+        val lastNotificationTime = settings.lastNotificationTimestamp
+        val notificationIntervalMinutes = settings.notificationIntervalMinutes
+        val gracePeriodMinutes = notificationIntervalMinutes * 2
+        val minutesSinceLastNotification = if (lastNotificationTime > 0) {
+            (timestamp - lastNotificationTime) / 60
+        } else {
+            Long.MAX_VALUE
+        }
+
+        if (minutesSinceLastNotification <= gracePeriodMinutes && lastNotificationTime > 0) {
+            val lastSchedule = schedules.filter { it.enabled }.maxByOrNull { it.endHour * 60 + it.endMinute }
+            if (lastSchedule != null) {
+                return com.pirorin215.medicinecasemob.ui.data.ScheduleType.fromId(lastSchedule.id)
+            }
+        }
+        return null
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -142,11 +284,16 @@ class MedicineBleScanService : Service() {
                 // Check if already connected
                 if (bleManager.connectionState.value is BleManager.ConnectionState.Connected) {
                     logManager.d(TAG, "Already connected, skipping scan")
+                // 定期的に通知チェックを実行
+                checkAndNotify()
+
                     delay(SCAN_INTERVAL_MS)
                     continue
                 }
 
-                logManager.d(TAG, "Starting BLE scan...")
+
+                // 定期的に通知チェックを実行
+                checkAndNotify()
                 bleManager.startScan()
 
                 // Wait before next scan
@@ -201,4 +348,37 @@ class MedicineBleScanService : Service() {
             .setOngoing(true)
             .build()
     }
+
+    private suspend fun checkAndNotify(forceNotification: Boolean = false) {
+        try {
+            val calendar = Calendar.getInstance()
+            val currentHour = calendar.get(Calendar.HOUR_OF_DAY)
+
+            // Reset notification flags at midnight
+            if (currentHour == 0) {
+                logManager.d(TAG, "Resetting notification flags at midnight")
+                repository.updateEndNotificationFlags(morning = false, afternoon = false, evening = false)
+                repository.updateInSlotNotificationFlags(morning = false, afternoon = false, evening = false)
+            }
+
+            // Ensure today's record exists and get it
+            val todayRecord = repository.ensureTodayRecordExists()
+
+            // Load settings from repository
+            val settings = repository.settingsFlow.first()
+            val schedules = repository.getSchedulesFromSettings(settings)
+
+            val isConnected = bleManager.connectionState.value is BleManager.ConnectionState.Connected
+
+            notificationService.checkAndNotifyMissedIntakes(
+                schedules = schedules,
+                todayRecord = todayRecord,
+                isConnectedToBle = isConnected,
+                forceNotification = forceNotification
+            )
+        } catch (e: Exception) {
+            logManager.e(TAG, "Error in checkAndNotify: " + e.message)
+        }
+    }
+
 }

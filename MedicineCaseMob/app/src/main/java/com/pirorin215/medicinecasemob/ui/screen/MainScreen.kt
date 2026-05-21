@@ -1,16 +1,17 @@
 package com.pirorin215.medicinecasemob.ui.screen
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -33,27 +34,21 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import kotlinx.coroutines.launch
 import com.pirorin215.medicinecasemob.ble.BleManager
 import com.pirorin215.medicinecasemob.ui.components.AppLogCard
 import com.pirorin215.medicinecasemob.ui.data.MedicineIntakeRecord
@@ -74,8 +69,8 @@ fun MainScreen(
     onNavigateToDebug: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    val schedules by viewModel.schedules.collectAsState()
     val intakeRecords by viewModel.intakeRecords.collectAsState()
+    val schedules by viewModel.schedules.collectAsState()
     val isConnected by viewModel.isConnected.collectAsState()
     val bleConnectionState by viewModel.bleConnectionState.collectAsState()
     val scanResults by viewModel.scanResults.collectAsState()
@@ -171,6 +166,13 @@ fun MainScreen(
                                         showAppLogsOverlay = !showAppLogsOverlay
                                     }
                                 )
+                                DropdownMenuItem(
+                                    text = { Text("全履歴削除", color = MaterialTheme.colorScheme.error) },
+                                    onClick = {
+                                        showMenu = false
+                                        viewModel.clearHistory()
+                                    }
+                                )
                             }
                         }
                     }
@@ -189,11 +191,12 @@ fun MainScreen(
                     .padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Today's status
+                // Schedule overview
                 item {
-                    TodayStatusCard(
+                    Spacer(modifier = Modifier.height(4.dp))
+                    ScheduleOverviewCard(
                         schedules = schedules,
-                        todayRecord = viewModel.getTodayRecord()
+                        onClick = onNavigateToScheduleSettings
                     )
                 }
 
@@ -281,93 +284,60 @@ fun MainScreen(
 }
 
 @Composable
-fun TodayStatusCard(
+fun ScheduleOverviewCard(
     schedules: List<MedicineSchedule>,
-    todayRecord: MedicineIntakeRecord?
+    onClick: () -> Unit
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer
-        )
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-        ) {
-            Text(
-                text = "本日の服薬状況",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Always show all 3 periods
-            ScheduleType.entries.forEach { type ->
-                val schedule = schedules.find { it.id == type.id }
-                val enabled = schedule?.enabled ?: true
-                val taken = when (type) {
-                    ScheduleType.MORNING -> todayRecord?.morningTaken == true
-                    ScheduleType.AFTERNOON -> todayRecord?.afternoonTaken == true
-                    ScheduleType.EVENING -> todayRecord?.eveningTaken == true
-                }
-                val timeRange = if (schedule != null) {
-                    "%02d:%02d-%02d:%02d".format(
-                        schedule.startHour, schedule.startMinute,
-                        schedule.endHour, schedule.endMinute
-                    )
-                } else {
-                    "${type.defaultStartHour}:00-${type.defaultEndHour}:00"
-                }
-
-                ScheduleStatusRow(
-                    type = type,
-                    timeRange = timeRange,
-                    taken = taken,
-                    enabled = enabled
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun ScheduleStatusRow(
-    type: ScheduleType,
-    timeRange: String,
-    taken: Boolean,
-    enabled: Boolean = true
-) {
-    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+            .clickable { onClick() },
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        )
     ) {
         Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = if (taken) "✅" else "⬜",
-                style = MaterialTheme.typography.bodyLarge
-            )
-            Text(
-                text = type.displayName,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Medium
-            )
-        }
+            ScheduleType.entries.forEach { type ->
+                val schedule = schedules.find { it.id == type.id }
+                val enabled = schedule?.enabled ?: false
 
-        Text(
-            text = timeRange,
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant
-                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
-        )
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = type.displayName,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = if (enabled) FontWeight.Bold else FontWeight.Normal
+                    )
+                    Text(
+                        text = if (enabled && schedule != null) {
+                            "%02d:%02d-%02d:%02d".format(schedule.startHour, schedule.startMinute, schedule.endHour, schedule.endMinute)
+                        } else {
+                            "オフ"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                    )
+                }
+
+                if (type != ScheduleType.EVENING) {
+                    Box(
+                        modifier = Modifier
+                            .height(24.dp)
+                            .width(1.dp)
+                            .background(MaterialTheme.colorScheme.outlineVariant)
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -421,14 +391,28 @@ fun HistoryRecordRow(
 
             // Show all 3 periods inline
             ScheduleType.entries.forEach { type ->
+                val enabled = when (type) {
+                    ScheduleType.MORNING -> record.morningEnabled
+                    ScheduleType.AFTERNOON -> record.afternoonEnabled
+                    ScheduleType.EVENING -> record.eveningEnabled
+                }
                 val taken = when (type) {
                     ScheduleType.MORNING -> record.morningTaken
                     ScheduleType.AFTERNOON -> record.afternoonTaken
                     ScheduleType.EVENING -> record.eveningTaken
                 }
+                
                 Text(
-                    text = if (taken) "✅${type.displayName}" else "⬜${type.displayName}",
+                    text = if (!enabled) {
+                        "　${type.displayName}"
+                    } else if (taken) {
+                        "✅${type.displayName}"
+                    } else {
+                        "⬜${type.displayName}"
+                    },
                     style = MaterialTheme.typography.bodyMedium,
+                    color = if (enabled) MaterialTheme.colorScheme.onSurface 
+                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
                     modifier = Modifier.padding(start = 8.dp)
                 )
             }

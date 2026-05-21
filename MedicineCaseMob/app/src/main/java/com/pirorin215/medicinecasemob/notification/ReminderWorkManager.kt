@@ -1,7 +1,7 @@
 package com.pirorin215.medicinecasemob.notification
 
 import android.content.Context
-import android.util.Log
+import com.pirorin215.medicinecasemob.util.LogManager
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
@@ -23,7 +23,7 @@ class ReminderWorkManager @Inject constructor(
      * Start periodic notification checks every 5 minutes.
      */
     fun startPeriodicChecks() {
-        Log.d(TAG, "Starting periodic notification checks")
+        LogManager.getInstance().d(TAG, "Starting periodic notification checks")
 
         val constraints = Constraints.Builder()
             .setRequiresCharging(false)
@@ -41,14 +41,14 @@ class ReminderWorkManager @Inject constructor(
             notificationCheckRequest
         )
 
-        Log.d(TAG, "Periodic notification checks scheduled")
+        LogManager.getInstance().d(TAG, "Periodic notification checks scheduled")
     }
 
     /**
      * Stop periodic notification checks.
      */
     fun stopPeriodicChecks() {
-        Log.d(TAG, "Stopping periodic notification checks")
+        LogManager.getInstance().d(TAG, "Stopping periodic notification checks")
         WorkManager.getInstance(context).cancelUniqueWork(NotificationScheduler.WORK_NAME)
     }
 }
