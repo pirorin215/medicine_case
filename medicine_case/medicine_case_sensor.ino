@@ -88,6 +88,11 @@ bool detectMedicineIntake() {
     static float maxChange = 0.0f;
     static unsigned long lastDetectionTime = 0;
 
+    // Stability tracking for baseline capture/refresh
+    static unsigned long stableDurationStart = 0;
+    static float lastStablePitch = 0.0f;
+    static float lastStableRoll = 0.0f;
+
     float pitchChange, rollChange, totalChange;
 
     switch (g_detectionState) {
@@ -107,14 +112,49 @@ bool detectMedicineIntake() {
                 lastDetectionTime = 0;
             }
 
-            // Set initial position only once
+            // Stability check for capturing or refreshing the baseline
+            {
+                float diff = sqrt(pow(g_currentPitch - lastStablePitch, 2) + pow(g_currentRoll - lastStableRoll, 2));
+                if (diff < 2.0f) { // Consider stable if movement is less than 2 degrees
+                    if (stableDurationStart == 0) {
+                        stableDurationStart = g_currentMillis;
+                    } else if (g_currentMillis - stableDurationStart > 1000) {
+                        // Stable for 1 second
+                        bool shouldSet = false;
+
+                        if (!initialPositionSet) {
+                            shouldSet = true;
+                            logPrint("SENSOR", "Initial position set (stable): Pitch=%.2f, Roll=%.2f",
+                                     g_currentPitch, g_currentRoll);
+                        } else {
+                            // Periodically refresh baseline if we are stable in a different position
+                            float distFromInitial = sqrt(pow(g_currentPitch - initialPitch, 2) + pow(g_currentRoll - initialRoll, 2));
+                            if (distFromInitial > 5.0f) {
+                                shouldSet = true;
+                                logPrint("SENSOR", "Baseline updated (drifted): Pitch=%.2f, Roll=%.2f",
+                                         g_currentPitch, g_currentRoll);
+                            }
+                        }
+
+                        if (shouldSet) {
+                            initialPitch = g_currentPitch;
+                            initialRoll = g_currentRoll;
+                            maxChange = 0.0f;
+                            initialPositionSet = true;
+                        }
+                        // Keep stableDurationStart to avoid repeated log/updates unless it moves and settles again
+                    }
+                } else {
+                    // Reset stability timer if moving
+                    lastStablePitch = g_currentPitch;
+                    lastStableRoll = g_currentRoll;
+                    stableDurationStart = g_currentMillis;
+                }
+            }
+
+            // Don't proceed to movement check until initial position is settled
             if (!initialPositionSet) {
-                initialPitch = g_currentPitch;
-                initialRoll = g_currentRoll;
-                maxChange = 0.0f;
-                initialPositionSet = true;
-                logPrint("SENSOR", "Initial position set: Pitch=%.2f, Roll=%.2f",
-                         initialPitch, initialRoll);
+                break;
             }
 
             // Calculate current change from initial position

@@ -82,6 +82,7 @@ fun MainScreen(
     var showDeleteSelectedDialog by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
     var showAppLogsOverlay by remember { mutableStateOf(false) }
+    var selectedRecordForDetails by remember { mutableStateOf<MedicineIntakeRecord?>(null) }
 
     if (showBleDialog) {
         BleConnectionDialog(
@@ -259,7 +260,12 @@ fun MainScreen(
                         record = record,
                         isSelectMode = isSelectMode,
                         isSelected = record.id in selectedRecordIds,
-                        onSelect = { viewModel.toggleRecordSelection(record.id) }
+                        onSelect = { viewModel.toggleRecordSelection(record.id) },
+                        onClick = {
+                            if (!isSelectMode) {
+                                selectedRecordForDetails = record
+                            }
+                        }
                     )
                 }
             }
@@ -280,6 +286,13 @@ fun MainScreen(
                 }
             }
         }
+    }
+
+    if (selectedRecordForDetails != null) {
+        RecordDetailsDialog(
+            record = selectedRecordForDetails!!,
+            onDismiss = { selectedRecordForDetails = null }
+        )
     }
 }
 
@@ -346,7 +359,8 @@ fun HistoryRecordRow(
     record: MedicineIntakeRecord,
     isSelectMode: Boolean,
     isSelected: Boolean,
-    onSelect: () -> Unit
+    onSelect: () -> Unit,
+    onClick: () -> Unit = {}
 ) {
     val dateFormat = SimpleDateFormat("MM月dd日（E）", Locale.JAPAN)
     val dateStr = dateFormat.format(Date(record.date * 1000))
@@ -355,7 +369,8 @@ fun HistoryRecordRow(
         modifier = Modifier
             .fillMaxWidth()
             .then(
-                if (isSelectMode) Modifier.clickable { onSelect() } else Modifier
+                if (isSelectMode) Modifier.clickable { onSelect() }
+                else Modifier.clickable { onClick() }
             ),
         colors = CardDefaults.cardColors(
             containerColor = if (isSelectMode && isSelected)
@@ -526,6 +541,81 @@ fun BleConnectionDialog(
                         Text("閉じる")
                     }
                 }
+            }
+        }
+    )
+}
+
+@Composable
+fun RecordDetailsDialog(
+    record: MedicineIntakeRecord,
+    onDismiss: () -> Unit
+) {
+    val dateFormat = SimpleDateFormat("yyyy年MM月dd日（E）", Locale.JAPAN)
+    val timeFormat = SimpleDateFormat("HH:mm", Locale.JAPAN)
+    val dateStr = dateFormat.format(Date(record.date * 1000))
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(dateStr) },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                ScheduleType.entries.forEach { type ->
+                    val enabled = when (type) {
+                        ScheduleType.MORNING -> record.morningEnabled
+                        ScheduleType.AFTERNOON -> record.afternoonEnabled
+                        ScheduleType.EVENING -> record.eveningEnabled
+                    }
+                    val taken = when (type) {
+                        ScheduleType.MORNING -> record.morningTaken
+                        ScheduleType.AFTERNOON -> record.afternoonTaken
+                        ScheduleType.EVENING -> record.eveningTaken
+                    }
+                    val mcuTime = when (type) {
+                        ScheduleType.MORNING -> record.morningTime
+                        ScheduleType.AFTERNOON -> record.afternoonTime
+                        ScheduleType.EVENING -> record.eveningTime
+                    }
+
+                    val statusText = when {
+                        !enabled -> "設定なし"
+                        taken && mcuTime > 0 -> "服薬時刻：${timeFormat.format(Date(mcuTime * 1000))}"
+                        taken -> "服薬時刻：不明"
+                        else -> "未服薬"
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Start,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "${type.displayName}：",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = statusText,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = when {
+                                !enabled -> MaterialTheme.colorScheme.onSurfaceVariant
+                                taken && mcuTime > 0 -> MaterialTheme.colorScheme.primary
+                                taken -> MaterialTheme.colorScheme.onSurfaceVariant
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            fontWeight = if (taken) FontWeight.Medium else FontWeight.Normal
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("閉じる")
             }
         }
     )

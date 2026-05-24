@@ -135,6 +135,7 @@ class BleManager @Inject constructor(
                 BluetoothGatt.STATE_CONNECTED -> {
                     logManager.d(TAG, "Connected to ${device.name} (${device.address})")
                     _connectionState.value = ConnectionState.Connected(device)
+                    _serviceReady.value = false  // Reset service ready for new connection
 
                     // Add delay before service discovery (from bikeclock)
                     Handler(Looper.getMainLooper()).postDelayed({

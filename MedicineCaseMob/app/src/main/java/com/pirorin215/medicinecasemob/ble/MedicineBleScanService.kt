@@ -171,13 +171,25 @@ class MedicineBleScanService : Service() {
 
         // Record (the record is guaranteed to exist now)
         val updatedRecord = when (scheduleType) {
-            com.pirorin215.medicinecasemob.ui.data.ScheduleType.MORNING -> todayRecord.copy(morningTaken = true, morningTime = effectiveTimestamp)
-            com.pirorin215.medicinecasemob.ui.data.ScheduleType.AFTERNOON -> todayRecord.copy(afternoonTaken = true, afternoonTime = effectiveTimestamp)
-            com.pirorin215.medicinecasemob.ui.data.ScheduleType.EVENING -> todayRecord.copy(eveningTaken = true, eveningTime = effectiveTimestamp)
+            com.pirorin215.medicinecasemob.ui.data.ScheduleType.MORNING -> todayRecord.copy(
+                morningTaken = true,
+                morningTime = mcuTimestamp,              // マイコン時刻
+                morningReceivedTime = phoneTimestamp     // スマホ受信時刻
+            )
+            com.pirorin215.medicinecasemob.ui.data.ScheduleType.AFTERNOON -> todayRecord.copy(
+                afternoonTaken = true,
+                afternoonTime = mcuTimestamp,            // マイコン時刻
+                afternoonReceivedTime = phoneTimestamp   // スマホ受信時刻
+            )
+            com.pirorin215.medicinecasemob.ui.data.ScheduleType.EVENING -> todayRecord.copy(
+                eveningTaken = true,
+                eveningTime = mcuTimestamp,             // マイコン時刻
+                eveningReceivedTime = phoneTimestamp    // スマホ受信時刻
+            )
         }
 
         repository.insertIntakeRecord(updatedRecord)
-        logManager.d(TAG, "Intake recorded: $scheduleType at time=$effectiveTimestamp (mcu=$mcuTimestamp, phone=$phoneTimestamp)")
+        logManager.d(TAG, "Intake recorded: $scheduleType mcu_time=$mcuTimestamp, phone_received=$phoneTimestamp")
     }
 
     private fun determineScheduleTypeForTimestamp(
@@ -254,8 +266,9 @@ class MedicineBleScanService : Service() {
                 val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
                 when (state) {
                     BluetoothAdapter.STATE_OFF -> {
-                        logManager.d(TAG, "Bluetooth turned OFF - stopping scan")
+                        logManager.d(TAG, "Bluetooth turned OFF - stopping scan and disconnecting")
                         stopContinuousScanning()
+                        bleManager.disconnect()  // Explicitly disconnect to clear invalid GATT object
                     }
                     BluetoothAdapter.STATE_ON -> {
                         logManager.d(TAG, "Bluetooth turned ON - starting scan")
