@@ -79,6 +79,9 @@ class DetectionSettingsViewModel @Inject constructor(
 
                 if (isConnected && serviceReady) {
                     bleManager.setDetectionAngle(_movementThreshold.value)
+                    // Wait for first command to complete before sending second
+                    // (Processing takes ~800ms based on logs)
+                    kotlinx.coroutines.delay(1000)
                     bleManager.setDetectionCooldown(_cooldownTime.value.toLong())
                     _saveSuccess.value = "設定を保存してマイコンに送信しました"
                 } else {

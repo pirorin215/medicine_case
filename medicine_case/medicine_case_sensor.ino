@@ -72,13 +72,8 @@ void updateSensor() {
             case DETECTION_STATE_CONFIRMED: stateName = "CONFIRMED"; break;
         }
 
-        Serial.print("SENSOR: Pitch=");
-        Serial.print(g_currentPitch, 1);
-        Serial.print(", Roll=");
-        Serial.print(g_currentRoll, 1);
-        Serial.print(", State=");
-        Serial.println(stateName);
-        Serial.flush();
+        logPrint("SENSOR", "Pitch=%.1f, Roll=%.1f, State=%s",
+                 g_currentPitch, g_currentRoll, stateName);
 
         lastLogTime = g_currentMillis;
     }
@@ -159,9 +154,10 @@ bool detectMedicineIntake() {
                 if (maxChange >= g_movementThreshold) {
                     logPrint("SENSOR", "✅ Medicine intake detected! %.2f degrees", maxChange);
 
-                    // Store intake timestamp
-                    g_lastIntakeTimestamp = g_currentTimestamp;
-                    logPrint("SENSOR", "Intake timestamp recorded: %lu", g_lastIntakeTimestamp);
+                    // Always record intake timestamp (even if time not synced)
+                    g_lastIntakeTimestamp = g_timeSynced ? g_currentTimestamp : 0;
+                    logPrint("SENSOR", "Intake timestamp recorded: %lu (synced: %s)",
+                             g_lastIntakeTimestamp, g_timeSynced ? "yes" : "no");
 
                     // Green LED feedback for 3 seconds
                     Serial.println("LED: GREEN blinking for 3 seconds (intake detected)");
@@ -177,10 +173,10 @@ bool detectMedicineIntake() {
 
                     g_detectionState = DETECTION_STATE_CONFIRMED;
 
-                    // Send BLE notification: INTAKE:<timestamp>
+                    // Send BLE notification: INTAKE:<timestamp> (always send)
                     char sensorData[64];
                     snprintf(sensorData, sizeof(sensorData),
-                             "INTAKE:%lu", g_currentTimestamp);
+                             "INTAKE:%lu", g_lastIntakeTimestamp);
                     sendSensorNotification(sensorData);
 
                     // Set cooldown

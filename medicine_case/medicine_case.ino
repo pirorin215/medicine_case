@@ -119,58 +119,50 @@ void handleDetectionConfig(const char* command) {
     //   SET:detection:angle:70.0  (Set movement threshold to 70 degrees)
     //   SET:detection:cooldown:30000  (Set cooldown to 30000ms)
 
-    const char* typeStart = command + strlen("SET:detection:");
+    const char* remainingCommand = command;
+
+    if (!startsWith(remainingCommand, "SET:detection:")) {
+        return;
+    }
 
     // Check detection type
-    if (strncmp(typeStart, "angle:", 6) == 0) {
+    if (startsWith(remainingCommand, "angle:")) {
         // Set movement threshold
-        const char* valueStr = typeStart + 6;
-        float value = atof(valueStr);
+        float value = atof(remainingCommand);
 
         if (value >= 10.0f && value <= 180.0f) {
             g_movementThreshold = value;
             logPrint("MEDICINE_CASE", "Movement threshold set to %.1f degrees", g_movementThreshold);
             saveSettings();
-            sendResponse("OK: Detection angle updated");
+            char response[32];
+            snprintf(response, sizeof(response), "OK:angle:%.1f", value);
+            sendResponse(response);
         } else {
             logPrint("MEDICINE_CASE", "Invalid angle value: %.1f (valid range: 10-180)", value);
-            sendResponse("ERROR: Invalid angle value (valid range: 10-180)");
+            sendResponse("ERR:angle");
         }
 
-    } else if (strncmp(typeStart, "cooldown:", 8) == 0) {
+    } else if (startsWith(remainingCommand, "cooldown:")) {
         // Set cooldown time
-        const char* valueStr = typeStart + 8;
-        unsigned long value = (unsigned long)atol(valueStr);
+        unsigned long value = (unsigned long)atol(remainingCommand);
 
         if (value >= 1000 && value <= 300000) {  // 1 second to 5 minutes
             g_cooldownTime = value;
             logPrint("MEDICINE_CASE", "Cooldown time set to %lu ms (%.1f seconds)",
                      g_cooldownTime, g_cooldownTime / 1000.0f);
             saveSettings();
-            sendResponse("OK: Detection cooldown updated");
+            char response[32];
+            snprintf(response, sizeof(response), "OK:cooldown:%lu", value);
+            sendResponse(response);
         } else {
             logPrint("MEDICINE_CASE", "Invalid cooldown value: %lu (valid range: 1000-300000)", value);
-            sendResponse("ERROR: Invalid cooldown value (valid range: 1000-300000)");
+            sendResponse("ERR:cooldown");
         }
 
     } else {
-        logPrint("MEDICINE_CASE", "Unknown detection config type: %s", typeStart);
-        sendResponse("ERROR: Unknown detection config type");
+        logPrint("MEDICINE_CASE", "Unknown detection config type: %s", remainingCommand);
+        sendResponse("ERR:config");
     }
-}
-
-void handleGetStatus() {
-    logPrint("MEDICINE_CASE", "Processing GET:status command");
-
-    char statusResponse[128];
-    snprintf(statusResponse, sizeof(statusResponse),
-             "OK:status:connected=%d,synced=%d,pending_intake=%lu",
-             g_deviceConnected ? 1 : 0,
-             g_timeSynced ? 1 : 0,
-             g_lastIntakeTimestamp);
-
-    sendResponse(statusResponse);
-    logPrint("MEDICINE_CASE", "Status response sent");
 }
 
 void handleGetVersion() {
@@ -202,7 +194,7 @@ void handleGetIntake() {
 void handleClearIntake() {
     logPrint("MEDICINE_CASE", "Processing CLR:intake command");
     g_lastIntakeTimestamp = 0;
-    sendResponse("OK: Intake cleared");
+    sendResponse("OK:clr");
     logPrint("MEDICINE_CASE", "Intake timestamp cleared");
 }
 
@@ -216,7 +208,7 @@ void setup() {
     }
 
     Serial.println("========================================");
-    Serial.println("Medicine Case v1.1.0");
+    Serial.printf("Medicine Case v%d.%d.%d\n", FIRMWARE_VERSION_MAJOR, FIRMWARE_VERSION_MINOR, FIRMWARE_VERSION_PATCH);
     Serial.println("========================================");
     Serial.flush();
 

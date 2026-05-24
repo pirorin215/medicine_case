@@ -117,7 +117,7 @@ void setupLog() {
     // テストメッセージを送信
     Serial.println();
     Serial.println("========================================");
-    Serial.println("Medicine Case v1.0.1");
+    Serial.printf("Medicine Case v%d.%d.%d\n", FIRMWARE_VERSION_MAJOR, FIRMWARE_VERSION_MINOR, FIRMWARE_VERSION_PATCH);
     Serial.println("✅ Serial port ready (115200 baud)");
     Serial.println("✅ Logging system initialized");
     Serial.println("========================================");
@@ -162,4 +162,18 @@ void logPrintRaw(const char* format, ...) {
 
     Serial.println(buffer);
     Serial.flush();
+}
+
+/**
+ * Checks if the string 'remainingCommand' starts with 'prefix'.
+ * If it matches, advances 'remainingCommand' to the end of the prefix and returns true.
+ * Otherwise, returns false and does not modify 'remainingCommand'.
+ */
+bool startsWith(const char* &remainingCommand, const char* prefix) {
+    size_t len = strlen(prefix);
+    if (strncmp(remainingCommand, prefix, len) == 0) {
+        remainingCommand += len;
+        return true;
+    }
+    return false;
 }

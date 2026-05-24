@@ -95,12 +95,13 @@ class MedicineBleScanService : Service() {
     }
 
     private fun observeBleEvents() {
-        // Observe connection state for sync/notify on connect
+        // Observe service ready state for sync/notify (wait for service discovery)
         serviceScope.launch {
-            bleManager.connectionState.collect { state ->
-                if (state is BleManager.ConnectionState.Connected) {
-                    logManager.d(TAG, "Connected event observed in Service - syncing")
+            bleManager.serviceReady.collect { ready ->
+                if (ready) {
+                    logManager.d(TAG, "Service ready observed in Service - syncing time and getting version")
                     bleManager.syncTime()
+                    bleManager.getVersion()
                     bleManager.getIntake()
 
                     // Check for missed intakes and notify immediately
@@ -118,13 +119,12 @@ class MedicineBleScanService : Service() {
 
                 if (event.startsWith("INTAKE:")) {
                     val timestampStr = event.removePrefix("INTAKE:")
-                    val timestamp = timestampStr.toLongOrNull()
+                    val timestamp = timestampStr.toLongOrNull() ?: 0L
 
-                    if (timestamp != null && timestamp > 0) {
-                        recordIntakeLocally(timestamp)
-                        // Clear intake timestamp on firmware
-                        bleManager.clearIntake()
-                    }
+                    // Always record intake (even if timestamp is 0)
+                    recordIntakeLocally(timestamp)
+                    // Clear intake timestamp on firmware
+                    bleManager.clearIntake()
                 }
 
                 // Consume and clear debug timestamps
@@ -137,13 +137,16 @@ class MedicineBleScanService : Service() {
     private suspend fun recordIntakeLocally(mcuTimestamp: Long) {
         val phoneTimestamp = System.currentTimeMillis() / 1000
 
+        // Use MCU timestamp if available, otherwise use phone timestamp
+        val effectiveTimestamp = if (mcuTimestamp > 0) mcuTimestamp else phoneTimestamp
+
         // Ensure today's record exists and get it
         val todayRecord = repository.ensureTodayRecordExists()
 
-        // Determine period
+        // Determine period (use effective timestamp for schedule determination)
         val settings = repository.settingsFlow.first()
         val schedules = repository.getSchedulesFromSettings(settings)
-        var scheduleType = determineScheduleTypeForTimestamp(phoneTimestamp, schedules)
+        var scheduleType = determineScheduleTypeForTimestamp(effectiveTimestamp, schedules)
 
         if (scheduleType == null) {
             scheduleType = determineScheduleTypeAfterNotification(phoneTimestamp, schedules, settings)
@@ -168,13 +171,13 @@ class MedicineBleScanService : Service() {
 
         // Record (the record is guaranteed to exist now)
         val updatedRecord = when (scheduleType) {
-            com.pirorin215.medicinecasemob.ui.data.ScheduleType.MORNING -> todayRecord.copy(morningTaken = true, morningTime = phoneTimestamp)
-            com.pirorin215.medicinecasemob.ui.data.ScheduleType.AFTERNOON -> todayRecord.copy(afternoonTaken = true, afternoonTime = phoneTimestamp)
-            com.pirorin215.medicinecasemob.ui.data.ScheduleType.EVENING -> todayRecord.copy(eveningTaken = true, eveningTime = phoneTimestamp)
+            com.pirorin215.medicinecasemob.ui.data.ScheduleType.MORNING -> todayRecord.copy(morningTaken = true, morningTime = effectiveTimestamp)
+            com.pirorin215.medicinecasemob.ui.data.ScheduleType.AFTERNOON -> todayRecord.copy(afternoonTaken = true, afternoonTime = effectiveTimestamp)
+            com.pirorin215.medicinecasemob.ui.data.ScheduleType.EVENING -> todayRecord.copy(eveningTaken = true, eveningTime = effectiveTimestamp)
         }
 
         repository.insertIntakeRecord(updatedRecord)
-        logManager.d(TAG, "Intake recorded: $scheduleType at phoneTime=$phoneTimestamp")
+        logManager.d(TAG, "Intake recorded: $scheduleType at time=$effectiveTimestamp (mcu=$mcuTimestamp, phone=$phoneTimestamp)")
     }
 
     private fun determineScheduleTypeForTimestamp(

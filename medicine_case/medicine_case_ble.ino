@@ -5,7 +5,6 @@
  * - SET:time:<timestamp>         - Time synchronization
  * - SET:detection:angle:<value>  - Set detection angle threshold
  * - SET:detection:cooldown:<ms>  - Set cooldown time
- * - GET:status                   - Get device status
  * - GET:version                  - Get firmware version
  * - GET:intake                   - Get last intake timestamp
  * - CLR:intake                   - Clear intake timestamp
@@ -71,28 +70,27 @@ void onCommandWritten(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, 
 
         logPrint("BLE", "Received command: %s", command);
 
+        const char* remainingCommand = command;
+
         // Parse command
-        if (strncmp(command, "SET:time:", 9) == 0) {
+        if (startsWith(remainingCommand, "SET:time:")) {
             logPrint("BLE", "Calling handleTimeSync...");
             handleTimeSync(command);
-        } else if (strncmp(command, "SET:detection:", 14) == 0) {
+        } else if (startsWith(remainingCommand, "SET:detection:")) {
             logPrint("BLE", "Calling handleDetectionConfig...");
             handleDetectionConfig(command);
-        } else if (strncmp(command, "GET:status", 10) == 0) {
-            logPrint("BLE", "Calling handleGetStatus...");
-            handleGetStatus();
-        } else if (strncmp(command, "GET:version", 11) == 0) {
+        } else if (startsWith(remainingCommand, "GET:version")) {
             logPrint("BLE", "Calling handleGetVersion...");
             handleGetVersion();
-        } else if (strncmp(command, "GET:intake", 10) == 0) {
+        } else if (startsWith(remainingCommand, "GET:intake")) {
             logPrint("BLE", "Calling handleGetIntake...");
             handleGetIntake();
-        } else if (strncmp(command, "CLR:intake", 10) == 0) {
+        } else if (startsWith(remainingCommand, "CLR:intake")) {
             logPrint("BLE", "Calling handleClearIntake...");
             handleClearIntake();
         } else {
             logPrint("BLE", "Unknown command: %s", command);
-            sendResponse("ERROR: Unknown command");
+            sendResponse("ERR:unknown");
         }
     }
 }
@@ -218,10 +216,15 @@ void handleTimeSync(const char* command) {
     logPrint("BLE", "Processing time sync command: %s", command);
 
     // Parse timestamp: SET:time:<timestamp>
-    const char* timestampStr = command + strlen("SET:time:");
-    uint32_t timestamp = (uint32_t)atol(timestampStr);
+    const char* remainingCommand = command;
+    if (!startsWith(remainingCommand, "SET:time:")) {
+        return;
+    }
 
-    if (timestamp > 0) {
+    uint32_t timestamp = (uint32_t)atol(remainingCommand);
+
+    // Basic validation: 946684800 is 2000-01-01 00:00:00 UTC
+    if (timestamp > 946684800) {
         g_currentTimestamp = timestamp;
         g_timeSynced = true;
 
@@ -236,17 +239,17 @@ void handleTimeSync(const char* command) {
                  hours, minutes, seconds);
 
         // Send success response
-        sendResponse("OK: Time synced");
+        sendResponse("OK:time");
     } else {
-        logPrint("BLE", "Invalid timestamp: %s", timestampStr);
-        sendResponse("ERROR: Invalid timestamp format");
+        logPrint("BLE", "Invalid timestamp value: %s", remainingCommand);
+        sendResponse("ERR:time");
         setLedError();
     }
 }
 
 // --- Response Helper ---
 void sendResponse(const char* message) {
-    bleCommandCharacteristic.notify((uint8_t*)message, strlen(message));
+    bleResponseCharacteristic.notify((uint8_t*)message, strlen(message));
     logPrint("BLE", "Response sent: %s", message);
 }
 

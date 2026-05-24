@@ -76,6 +76,14 @@ class BleManager @Inject constructor(
     private val _lastIntakeTimestamp = MutableStateFlow<Long?>(null)
     val lastIntakeTimestamp: StateFlow<Long?> = _lastIntakeTimestamp.asStateFlow()
 
+    // Latest firmware response (for debug)
+    private val _lastFirmwareResponse = MutableStateFlow<String>("待機中...")
+    val lastFirmwareResponse: StateFlow<String> = _lastFirmwareResponse.asStateFlow()
+
+    // Firmware version
+    private val _firmwareVersion = MutableStateFlow<String?>(null)
+    val firmwareVersion: StateFlow<String?> = _firmwareVersion.asStateFlow()
+
     // Intake event history (max 100 items)
     private val _intakeEventHistory = MutableStateFlow<List<IntakeEventItem>>(emptyList())
     val intakeEventHistory: StateFlow<List<IntakeEventItem>> = _intakeEventHistory.asStateFlow()
@@ -181,16 +189,30 @@ class BleManager @Inject constructor(
             when (characteristic.uuid) {
                 CHAR_RESPONSE_UUID -> {
                     logManager.d(TAG, "Response: $data")
-                    // Handle GET:intake response
-                    if (data.startsWith("INTAKE:")) {
-                        logManager.d(TAG, "Intake response received: $data")
-                        _intakeEvent.value = data
-                        // Update last intake timestamp for debug
+                    // Update latest firmware response for debug
+                    _lastFirmwareResponse.value = data
+
+                    // Handle Version response
+                    if (data.startsWith("OK:version:")) {
+                        val version = data.removePrefix("OK:version:")
+                        _firmwareVersion.value = version
+                        logManager.i(TAG, "Firmware version: $version")
+                    }
+
+                    // Add all responses to history for debug
+                    val timestamp = if (data.startsWith("INTAKE:")) {
                         val timestampStr = data.removePrefix("INTAKE:")
-                        val timestamp = timestampStr.toLongOrNull()
-                        if (timestamp != null && timestamp > 0) {
+                        timestampStr.toLongOrNull() ?: 0L
+                    } else {
+                        0L
+                    }
+                    addToIntakeHistory(data, timestamp)
+
+                    // Update intake event for MedicineBleScanService
+                    if (data.startsWith("INTAKE:") || data == "NONE") {
+                        _intakeEvent.value = data
+                        if (data.startsWith("INTAKE:")) {
                             _lastIntakeTimestamp.value = timestamp
-                            addToIntakeHistory(data, timestamp)
                         }
                     }
                 }
@@ -202,11 +224,9 @@ class BleManager @Inject constructor(
                         _intakeEvent.value = data
                         // Update last intake timestamp for debug
                         val timestampStr = data.removePrefix("INTAKE:")
-                        val timestamp = timestampStr.toLongOrNull()
-                        if (timestamp != null && timestamp > 0) {
-                            _lastIntakeTimestamp.value = timestamp
-                            addToIntakeHistory(data, timestamp)
-                        }
+                        val timestamp = timestampStr.toLongOrNull() ?: 0L
+                        _lastIntakeTimestamp.value = timestamp
+                        addToIntakeHistory(data, timestamp)
                     }
                 }
             }
@@ -490,10 +510,6 @@ class BleManager @Inject constructor(
         val event = _intakeEvent.value
         _intakeEvent.value = null
         return event
-    }
-
-    fun getStatus() {
-        sendCommand("GET:status")
     }
 
     fun getVersion() {

@@ -13,7 +13,7 @@ using namespace Adafruit_LittleFS_Namespace;
 // --- Firmware Version Information ---
 #define FIRMWARE_VERSION_MAJOR 1
 #define FIRMWARE_VERSION_MINOR 1
-#define FIRMWARE_VERSION_PATCH 0
+#define FIRMWARE_VERSION_PATCH 4
 
 // --- BLE Settings ---
 #define BLE_DEVICE_NAME       "MedicineCase-0001"
@@ -83,7 +83,6 @@ void setupBLE();
 void setupSensor();
 void handleTimeSync(const char* command);
 void handleDetectionConfig(const char* command);
-void handleGetStatus();
 void handleGetVersion();
 void handleGetIntake();
 void handleClearIntake();
@@ -91,6 +90,7 @@ void loadSettings();
 void saveSettings();
 void sendResponse(const char* message);
 void sendSensorNotification(const char* data);
+bool startsWith(const char* &remainingCommand, const char* prefix);
 
 // LED Debug functions
 void ledDebugShowPattern(int pattern);
