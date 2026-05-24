@@ -22,7 +22,8 @@
 
 ## 仕様ドキュメント
 
-- **[服薬通知・記録仕様](INTAKE_NOTIFICATION_SPEC.md)**: スケジュール、通知ロジック、履歴管理の詳細。
+- **[システム仕様書](../docs/SYSTEM_SPEC.md)**: システム全体のアーキテクチャ、服薬検出仕様、通知・履歴管理仕様
+- **[BLE通信プロトコル仕様](../medicine_case/PROTOCOL_SPEC.md)**: Service UUID, Characteristic UUID, コマンドフォーマットの詳細
 
 ## セットアップ
 

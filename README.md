@@ -7,14 +7,14 @@
 ```
 medicine_case/
 ├── README.md                   # プロジェクト概要（本ファイル）
+├── docs/                       # システム仕様書
+│   └── SYSTEM_SPEC.md          # システム全体の仕様
 ├── medicine_case/              # マイコン用ファームウェア (Arduino/PlatformIO)
 │   ├── README.md               # ファームウェア概要
-│   ├── PROTOCOL_SPEC.md         # BLE通信プロトコル仕様 ★ NEW
-│   ├── DATA_FLOW_SPEC.md        # データフロー仕様 ★ NEW
-│   └── INTAKE_DETECTION_SPEC.md # 服薬検出仕様 ★ NEW
+│   └── PROTOCOL_SPEC.md        # BLE通信プロトコル仕様
 │
 └── MedicineCaseMob/            # スマートフォンアプリ (Android)
-    └── INTAKE_NOTIFICATION_SPEC.md # 通知・履歴管理仕様
+    └── README.md               # アプリ概要
 ```
 
 ## システム概要
@@ -39,34 +39,27 @@ medicine_case/
 
 ## ドキュメント一覧
 
+### システム仕様
+- **[システム仕様書](docs/SYSTEM_SPEC.md)**
+  - システムアーキテクチャ
+  - 服薬検出仕様（マイコン側）
+  - 通知・履歴管理仕様（アプリ側）
+  - データ同期とスタンドアロン動作
+
 ### 通信・プロトコル
-- **[BLE通信プロトコル仕様](medicine_case/PROTOCOL_SPEC.md)** ★ NEW
+- **[BLE通信プロトコル仕様](medicine_case/PROTOCOL_SPEC.md)**
   - Service UUID, Characteristic UUID
   - コマンドフォーマット（SET:time, GET:intakeなど）
   - 応答フォーマット
-
-- **[データフロー仕様](medicine_case/DATA_FLOW_SPEC.md)** ★ NEW
-  - システムアーキテクチャ
-  - 通信シーケンス
-  - タイミング図
-  - データ管理
-
-### 機能仕様
-- **[服薬検出仕様](medicine_case/INTAKE_DETECTION_SPEC.md)** ★ NEW
-  - 検出原理（6軸センサー）
-  - 判定基準（角度閾値、クールダウン）
-  - 状態遷移（IDLE → MOVING → CONFIRMED）
-  - LEDフィードバック
-
-- **[アプリ通知・履歴仕様](MedicineCaseMob/INTAKE_NOTIFICATION_SPEC.md)**
-  - スケジュール管理
-  - 通知ロジック
-  - 履歴管理
 
 ### 概要
 - **[ファームウェア概要](medicine_case/README.md)**
   - ハードウェア構成
   - ソフトウェア構成
+  - セットアップ手順
+
+- **[アプリ概要](MedicineCaseMob/README.md)**
+  - 技術スタック
   - セットアップ手順
 
 ## クイックスタート

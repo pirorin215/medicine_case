@@ -50,6 +50,11 @@ INTAKE:timestamp をBLE通知       ②時刻補完（timestamp=0なら受信時
 - スマートフォンアプリとのBLE接続・通信
 - **詳細**: [BLE通信プロトコル仕様](PROTOCOL_SPEC.md)を参照
 
+## 仕様ドキュメント
+
+- **[システム仕様書](../docs/SYSTEM_SPEC.md)**: システム全体のアーキテクチャ、服薬検出仕様、通知・履歴管理仕様
+- **[BLE通信プロトコル仕様](PROTOCOL_SPEC.md)**: Service UUID, Characteristic UUID, コマンドフォーマットの詳細
+
 ## ソフトウェア構成
 
 ```
