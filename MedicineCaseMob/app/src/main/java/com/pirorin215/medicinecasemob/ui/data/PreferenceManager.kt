@@ -65,6 +65,9 @@ class PreferenceManager @Inject constructor(private val context: Context) {
 
         // UI Settings
         val UI_FONT_SIZE_SCALE = floatPreferencesKey("ui_font_size_scale")
+
+        // Connection Settings
+        val LAST_DEVICE_ADDRESS = stringPreferencesKey("last_device_address")
     }
 
     val settingsFlow: Flow<AppSettingsData> = context.dataStore.data
@@ -115,7 +118,9 @@ class PreferenceManager @Inject constructor(private val context: Context) {
 
                 notifiedInSlotMorning = preferences[PreferencesKeys.NOTIFIED_IN_SLOT_MORNING] ?: false,
                 notifiedInSlotAfternoon = preferences[PreferencesKeys.NOTIFIED_IN_SLOT_AFTERNOON] ?: false,
-                notifiedInSlotEvening = preferences[PreferencesKeys.NOTIFIED_IN_SLOT_EVENING] ?: false
+                notifiedInSlotEvening = preferences[PreferencesKeys.NOTIFIED_IN_SLOT_EVENING] ?: false,
+
+                lastDeviceAddress = preferences[PreferencesKeys.LAST_DEVICE_ADDRESS]
             )
         }
 
@@ -161,6 +166,22 @@ class PreferenceManager @Inject constructor(private val context: Context) {
             preferences[PreferencesKeys.NOTIFIED_IN_SLOT_MORNING] = settings.notifiedInSlotMorning
             preferences[PreferencesKeys.NOTIFIED_IN_SLOT_AFTERNOON] = settings.notifiedInSlotAfternoon
             preferences[PreferencesKeys.NOTIFIED_IN_SLOT_EVENING] = settings.notifiedInSlotEvening
+
+            if (settings.lastDeviceAddress != null) {
+                preferences[PreferencesKeys.LAST_DEVICE_ADDRESS] = settings.lastDeviceAddress
+            } else {
+                preferences.remove(PreferencesKeys.LAST_DEVICE_ADDRESS)
+            }
+        }
+    }
+
+    suspend fun updateLastDeviceAddress(address: String?) {
+        context.dataStore.edit { preferences ->
+            if (address != null) {
+                preferences[PreferencesKeys.LAST_DEVICE_ADDRESS] = address
+            } else {
+                preferences.remove(PreferencesKeys.LAST_DEVICE_ADDRESS)
+            }
         }
     }
 

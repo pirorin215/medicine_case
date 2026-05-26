@@ -51,5 +51,8 @@ data class AppSettingsData(
     // 内部管理用（枠内通知済みフラグ）
     val notifiedInSlotMorning: Boolean = false,
     val notifiedInSlotAfternoon: Boolean = false,
-    val notifiedInSlotEvening: Boolean = false
+    val notifiedInSlotEvening: Boolean = false,
+
+    // 接続設定
+    val lastDeviceAddress: String? = null
 )

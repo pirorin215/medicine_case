@@ -51,6 +51,9 @@ class MedicineRepository(
     suspend fun updateLastNotificationTimestamp(timestamp: Long) =
         preferenceManager.updateLastNotificationTimestamp(timestamp)
 
+    suspend fun updateLastDeviceAddress(address: String?) =
+        preferenceManager.updateLastDeviceAddress(address)
+
     /**
      * Helper to get schedules as a list from settings
      */

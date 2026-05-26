@@ -65,6 +65,10 @@ class MedicineBleScanService : Service() {
     private var scanJob: Job? = null
     private val serviceScope = CoroutineScope(Dispatchers.IO + Job())
 
+    // Track processed intake timestamps to prevent duplicates
+    private val processedIntakeTimestamps = mutableSetOf<Long>()
+    private val MAX_PROCESSED_TIMESTAMPS = 100
+
     inner class LocalBinder : Binder() {
         fun getService(): MedicineBleScanService = this@MedicineBleScanService
     }
@@ -104,8 +108,34 @@ class MedicineBleScanService : Service() {
                     bleManager.getVersion()
                     bleManager.getIntake()
 
+                    // Save last connected device address
+                    val currentState = bleManager.connectionState.value
+                    if (currentState is BleManager.ConnectionState.Connected) {
+                        repository.updateLastDeviceAddress(currentState.device.address)
+                        logManager.d(TAG, "Saved last device address: ${currentState.device.address}")
+                    }
+
                     // Check for missed intakes and notify immediately
                     checkAndNotify(forceNotification = true)
+                }
+            }
+        }
+
+        // Observe scan results to auto-connect to matching devices in background
+        serviceScope.launch {
+            bleManager.scanResults.collect { results ->
+                if (results.isEmpty()) return@collect
+                
+                // Only auto-connect if we are currently disconnected
+                if (bleManager.connectionState.value is BleManager.ConnectionState.Disconnected) {
+                    val matchingDevice = results.firstOrNull { 
+                        it.device.name?.startsWith(BleManager.DEVICE_NAME_PREFIX) == true 
+                    }?.device
+                    
+                    if (matchingDevice != null) {
+                        logManager.d(TAG, "Auto-connecting to discovered device: ${matchingDevice.name}")
+                        bleManager.connectToDevice(matchingDevice)
+                    }
                 }
             }
         }
@@ -121,10 +151,13 @@ class MedicineBleScanService : Service() {
                     val timestampStr = event.removePrefix("INTAKE:")
                     val timestamp = timestampStr.toLongOrNull() ?: 0L
 
-                    // Always record intake (even if timestamp is 0)
-                    recordIntakeLocally(timestamp)
-                    // Clear intake timestamp on firmware
-                    bleManager.clearIntake()
+                    // Check for duplicates before recording
+                    if (!isDuplicateIntake(timestamp)) {
+                        // Always record intake (even if timestamp is 0)
+                        recordIntakeLocally(timestamp)
+                    } else {
+                        logManager.d(TAG, "Duplicate intake event ignored: $timestamp")
+                    }
                 }
 
                 // Consume and clear debug timestamps
@@ -132,6 +165,34 @@ class MedicineBleScanService : Service() {
                 bleManager.clearLastIntakeTimestamp()
             }
         }
+    }
+
+    /**
+     * Check if the intake timestamp has already been processed.
+     * @param timestamp The intake timestamp to check
+     * @return true if duplicate, false if new
+     */
+    private fun isDuplicateIntake(timestamp: Long): Boolean {
+        // Skip zero timestamps (unsynced time)
+        if (timestamp == 0L) return false
+
+        // Check if already processed
+        if (processedIntakeTimestamps.contains(timestamp)) {
+            return true
+        }
+
+        // Add to processed set
+        processedIntakeTimestamps.add(timestamp)
+
+        // Keep set size bounded
+        if (processedIntakeTimestamps.size > MAX_PROCESSED_TIMESTAMPS) {
+            // Remove oldest entries (first half of the set)
+            val toRemove = processedIntakeTimestamps.take(MAX_PROCESSED_TIMESTAMPS / 2)
+            processedIntakeTimestamps.removeAll(toRemove)
+            logManager.d(TAG, "Cleaned up old timestamps: ${toRemove.size} removed")
+        }
+
+        return false
     }
 
     private suspend fun recordIntakeLocally(mcuTimestamp: Long) {
@@ -297,20 +358,26 @@ class MedicineBleScanService : Service() {
                     continue
                 }
 
-                // Check if already connected
-                if (bleManager.connectionState.value is BleManager.ConnectionState.Connected) {
-                    logManager.d(TAG, "Already connected, skipping scan")
-                // 定期的に通知チェックを実行
-                checkAndNotify()
+                // Check if already connected or connecting
+                val currentState = bleManager.connectionState.value
+                if (currentState is BleManager.ConnectionState.Connected || 
+                    currentState is BleManager.ConnectionState.Connecting) {
+                    logManager.d(TAG, "Already connected or connecting ($currentState), skipping scan")
+                    // 定期的に通知チェックを実行
+                    checkAndNotify()
 
                     delay(SCAN_INTERVAL_MS)
                     continue
                 }
 
-
                 // 定期的に通知チェックを実行
                 checkAndNotify()
-                bleManager.startScan()
+                
+                // Get last connected address for faster reconnection
+                val settings = repository.settingsFlow.first()
+                val lastAddress = settings.lastDeviceAddress
+                
+                bleManager.startScan(lastAddress)
 
                 // Wait before next scan
                 delay(SCAN_INTERVAL_MS)

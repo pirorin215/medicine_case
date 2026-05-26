@@ -11,11 +11,14 @@ import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
+import android.os.ParcelUuid
 import com.pirorin215.medicinecasemob.util.LogManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -239,15 +242,16 @@ class BleManager @Inject constructor(
             status: Int
         ) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
-                logManager.d(TAG, "Descriptor write success: ${descriptor.characteristic.uuid}")
+                logManager.i(TAG, "✅ Descriptor write SUCCESS: ${descriptor.characteristic.uuid}")
             } else {
-                logManager.e(TAG, "Descriptor write failed: ${descriptor.characteristic.uuid}, status: $status")
+                logManager.e(TAG, "❌ Descriptor write FAILED: ${descriptor.characteristic.uuid}, status: $status")
             }
 
             // Process next descriptor in queue
             synchronized(descriptorQueue) {
                 isWritingDescriptor = false
             }
+            logManager.d(TAG, "Processing next descriptor, remaining: ${descriptorQueue.size}")
             processDescriptorQueue()
         }
 
@@ -282,7 +286,7 @@ class BleManager @Inject constructor(
     }
 
     @SuppressLint("MissingPermission")
-    fun startScan() {
+    fun startScan(targetAddress: String? = null) {
         if (!isBluetoothAvailable()) {
             logManager.e(TAG, "Bluetooth LE not available")
             return
@@ -298,7 +302,21 @@ class BleManager @Inject constructor(
             return
         }
 
-        // First, try to find bonded devices
+        // 1. Try to connect to target address if provided
+        if (targetAddress != null) {
+            try {
+                val device = bluetoothAdapter?.getRemoteDevice(targetAddress)
+                if (device != null) {
+                    logManager.d(TAG, "Found target device address: $targetAddress")
+                    connectToDevice(device)
+                    return
+                }
+            } catch (e: Exception) {
+                logManager.e(TAG, "Error getting remote device for $targetAddress: ${e.message}")
+            }
+        }
+
+        // 2. Try to find bonded devices
         val bondedDevices = bluetoothAdapter?.bondedDevices
         val bondedMedicineCase = bondedDevices?.find { it.name?.startsWith(DEVICE_NAME_PREFIX) == true }
 
@@ -309,11 +327,21 @@ class BleManager @Inject constructor(
             return
         }
 
-        logManager.d(TAG, "No bonded device found, starting scan...")
+        logManager.d(TAG, "No specific device to connect, starting scan...")
         isScanning = true
         _scanResults.value = emptyList()
 
-        bluetoothLeScanner?.startScan(scanCallback)
+        // Scan filter for our service UUID
+        val filters = listOf(
+            ScanFilter.Builder().setServiceUuid(ParcelUuid(SERVICE_UUID)).build()
+        )
+        
+        // Use Balanced or Low Power mode for background friendly scanning
+        val settings = ScanSettings.Builder()
+            .setScanMode(ScanSettings.SCAN_MODE_BALANCED)
+            .build()
+
+        bluetoothLeScanner?.startScan(filters, settings, scanCallback)
 
         // Stop scan after SCAN_PERIOD
         Handler(Looper.getMainLooper()).postDelayed({
@@ -358,7 +386,10 @@ class BleManager @Inject constructor(
 
     @SuppressLint("MissingPermission")
     private fun enableNotifications(gatt: BluetoothGatt) {
-        val service = gatt.getService(SERVICE_UUID) ?: return
+        val service = gatt.getService(SERVICE_UUID) ?: run {
+            logManager.e(TAG, "enableNotifications: Service not found")
+            return
+        }
 
         // Queue descriptors for both characteristics (must write one at a time)
         val responseChar = service.getCharacteristic(CHAR_RESPONSE_UUID)
@@ -371,7 +402,11 @@ class BleManager @Inject constructor(
                 synchronized(descriptorQueue) {
                     descriptorQueue.add(descriptor)
                 }
+            } else {
+                logManager.e(TAG, "Response characteristic descriptor not found")
             }
+        } else {
+            logManager.e(TAG, "Response characteristic not found")
         }
 
         val sensorChar = service.getCharacteristic(CHAR_SENSOR_UUID)
@@ -384,21 +419,45 @@ class BleManager @Inject constructor(
                 synchronized(descriptorQueue) {
                     descriptorQueue.add(descriptor)
                 }
+            } else {
+                logManager.e(TAG, "Sensor characteristic descriptor not found")
             }
+        } else {
+            logManager.e(TAG, "Sensor characteristic not found")
         }
 
         // Start processing the queue
+        logManager.d(TAG, "Starting descriptor queue processing, queue size: ${descriptorQueue.size}")
         processDescriptorQueue()
     }
 
     @SuppressLint("MissingPermission")
     private fun processDescriptorQueue() {
+        val gatt = bluetoothGatt
+        if (gatt == null) {
+            logManager.e(TAG, "processDescriptorQueue: bluetoothGatt is null")
+            return
+        }
+
         synchronized(descriptorQueue) {
-            if (isWritingDescriptor || descriptorQueue.isEmpty()) return
+            if (isWritingDescriptor) {
+                logManager.d(TAG, "processDescriptorQueue: Already writing descriptor, waiting...")
+                return
+            }
+            if (descriptorQueue.isEmpty()) {
+                logManager.d(TAG, "processDescriptorQueue: Descriptor queue is empty")
+                return
+            }
+
             isWritingDescriptor = true
             val descriptor = descriptorQueue.removeAt(0)
-            bluetoothGatt?.writeDescriptor(descriptor)
-            logManager.d(TAG, "Descriptor write initiated for ${descriptor.characteristic.uuid}")
+            val result = gatt.writeDescriptor(descriptor)
+            if (result) {
+                logManager.d(TAG, "Descriptor write initiated for ${descriptor.characteristic.uuid}")
+            } else {
+                logManager.e(TAG, "Descriptor write FAILED for ${descriptor.characteristic.uuid}")
+                isWritingDescriptor = false
+            }
         }
     }
 
@@ -496,11 +555,6 @@ class BleManager @Inject constructor(
     fun getIntake(): Boolean {
         logManager.d(TAG, "getIntake: requesting intake timestamp")
         return sendCommand("GET:intake")
-    }
-
-    fun clearIntake(): Boolean {
-        logManager.d(TAG, "clearIntake: clearing intake timestamp")
-        return sendCommand("CLR:intake")
     }
 
     /**
