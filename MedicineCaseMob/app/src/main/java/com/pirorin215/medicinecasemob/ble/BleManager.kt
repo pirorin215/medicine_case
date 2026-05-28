@@ -20,9 +20,12 @@ import android.os.Handler
 import android.os.Looper
 import android.os.ParcelUuid
 import com.pirorin215.medicinecasemob.util.LogManager
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.withTimeout
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -105,6 +108,10 @@ class BleManager @Inject constructor(
     private val writeQueue = mutableListOf<String>()
     private var isWriting = false
 
+    // Channel for synchronous intake query responses
+    // Used by queryIntake() to wait for GET:intake response
+    private val _intakeQueryChannel = Channel<String>(Channel.BUFFERED)
+
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val device = result.device
@@ -121,6 +128,10 @@ class BleManager @Inject constructor(
                 val device = result.device
                 if (device.name?.startsWith(DEVICE_NAME_PREFIX) == true) {
                     logManager.d(TAG, "Found device in batch: ${device.name} (${device.address})")
+                    // デバイスを_scanResultsに追加（onScanResultと同じ処理）
+                    val updatedResults = _scanResults.value.toMutableList()
+                    updatedResults.add(result)
+                    _scanResults.value = updatedResults
                 }
             }
         }
@@ -215,6 +226,7 @@ class BleManager @Inject constructor(
                     // Update intake event for MedicineBleScanService
                     if (data.startsWith("INTAKE:") || data == "NONE") {
                         _intakeEvent.value = data
+                        _intakeQueryChannel.trySend(data)
                         if (data.startsWith("INTAKE:")) {
                             _lastIntakeTimestamp.value = timestamp
                         }
@@ -226,6 +238,7 @@ class BleManager @Inject constructor(
                     if (data.startsWith("INTAKE:")) {
                         logManager.d(TAG, "Intake event received: $data")
                         _intakeEvent.value = data
+                        _intakeQueryChannel.trySend(data)
                         // Update last intake timestamp for debug
                         val timestampStr = data.removePrefix("INTAKE:")
                         val timestamp = timestampStr.toLongOrNull() ?: 0L
@@ -338,7 +351,9 @@ class BleManager @Inject constructor(
         
         // Use Balanced or Low Power mode for background friendly scanning
         val settings = ScanSettings.Builder()
-            .setScanMode(ScanSettings.SCAN_MODE_BALANCED)
+            .setScanMode(ScanSettings.SCAN_MODE_LOW_POWER)
+            .setCallbackType(ScanSettings.CALLBACK_TYPE_FIRST_MATCH)
+            .setReportDelay(1000L)
             .build()
 
         bluetoothLeScanner?.startScan(filters, settings, scanCallback)
@@ -555,6 +570,43 @@ class BleManager @Inject constructor(
     fun getIntake(): Boolean {
         logManager.d(TAG, "getIntake: requesting intake timestamp")
         return sendCommand("GET:intake")
+    }
+
+    /**
+     * Send GET:intake command and synchronously wait for the BLE response.
+     * Used for periodic polling to keep DB in sync with the MCU.
+     *
+     * @return "INTAKE:<timestamp>", "NONE", or null on timeout/failure
+     */
+    suspend fun queryIntake(timeoutMs: Long = 3000L): String? {
+        // Clear stale data from channel
+        while (_intakeQueryChannel.tryReceive().isSuccess) { }
+
+        val sent = sendCommand("GET:intake")
+        if (!sent) {
+            logManager.e(TAG, "queryIntake: failed to send command")
+            return null
+        }
+
+        return try {
+            withTimeout(timeoutMs) {
+                _intakeQueryChannel.receive()
+            }
+        } catch (e: TimeoutCancellationException) {
+            logManager.e(TAG, "queryIntake timed out after ${timeoutMs}ms")
+            null
+        }
+    }
+
+    /**
+     * Clear the internal intake event and request intake from BLE device.
+     * This is used after clearing intake records to re-fetch from the device.
+     */
+    fun clearAndGetIntake() {
+        logManager.d(TAG, "clearAndGetIntake: clearing internal event and requesting from BLE")
+        _intakeEvent.value = null  // Clear internal event
+        _lastIntakeTimestamp.value = null  // Clear last timestamp
+        getIntake()  // Request from BLE device
     }
 
     /**

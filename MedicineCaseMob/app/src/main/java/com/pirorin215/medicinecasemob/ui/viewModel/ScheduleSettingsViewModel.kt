@@ -3,6 +3,7 @@ package com.pirorin215.medicinecasemob.ui.viewModel
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.pirorin215.medicinecasemob.ble.BleManager
 import com.pirorin215.medicinecasemob.ui.data.AppSettingsData
 import com.pirorin215.medicinecasemob.ui.data.MedicineSchedule
 import com.pirorin215.medicinecasemob.ui.data.ScheduleType
@@ -22,7 +23,8 @@ import javax.inject.Inject
 @HiltViewModel
 class ScheduleSettingsViewModel @Inject constructor(
     private val repository: com.pirorin215.medicinecasemob.ui.data.MedicineRepository,
-    private val logManager: LogManager
+    private val logManager: LogManager,
+    private val bleManager: BleManager
 ) : ViewModel() {
 
     companion object {
@@ -73,21 +75,45 @@ class ScheduleSettingsViewModel @Inject constructor(
         viewModelScope.launch {
             val current = repository.settingsFlow.first()
             val updated = when (type) {
-                ScheduleType.MORNING -> current.copy(
-                    morningStartHour = startHour, morningStartMinute = startMinute,
-                    morningEndHour = endHour, morningEndMinute = endMinute,
-                    notifiedAtEndOfMorning = if (current.morningEndHour != endHour || current.morningEndMinute != endMinute) false else current.notifiedAtEndOfMorning
-                )
-                ScheduleType.AFTERNOON -> current.copy(
-                    afternoonStartHour = startHour, afternoonStartMinute = startMinute,
-                    afternoonEndHour = endHour, afternoonEndMinute = endMinute,
-                    notifiedAtEndOfAfternoon = if (current.afternoonEndHour != endHour || current.afternoonEndMinute != endMinute) false else current.notifiedAtEndOfAfternoon
-                )
-                ScheduleType.EVENING -> current.copy(
-                    eveningStartHour = startHour, eveningStartMinute = startMinute,
-                    eveningEndHour = endHour, eveningEndMinute = endMinute,
-                    notifiedAtEndOfEvening = if (current.eveningEndHour != endHour || current.eveningEndMinute != endMinute) false else current.notifiedAtEndOfEvening
-                )
+                ScheduleType.MORNING -> {
+                    // 朝の時間範囲を変更
+                    // - 朝の開始時刻: morningStartMinute
+                    // - 昼の開始時刻: afternoonStartMinute（朝の終了時刻として使用）
+                    val newMorningStart = startHour * 60 + startMinute
+                    val newAfternoonStart = endHour * 60 + endMinute
+
+                    current.copy(
+                        morningStartMinute = newMorningStart,
+                        afternoonStartMinute = newAfternoonStart,
+                        notifiedAtEndOfMorning = false
+                    )
+                }
+                ScheduleType.AFTERNOON -> {
+                    // 昼の時間範囲を変更
+                    // - 昼の開始時刻: afternoonStartMinute（朝の終了時刻としても使用）
+                    // - 夜の開始時刻: eveningStartMinute（昼の終了時刻として使用）
+                    val newAfternoonStart = startHour * 60 + startMinute
+                    val newEveningStart = endHour * 60 + endMinute
+
+                    current.copy(
+                        afternoonStartMinute = newAfternoonStart,
+                        eveningStartMinute = newEveningStart,
+                        notifiedAtEndOfAfternoon = false
+                    )
+                }
+                ScheduleType.EVENING -> {
+                    // 夜の時間範囲を変更
+                    // - 夜の開始時刻: eveningStartMinute（昼の終了時刻としても使用）
+                    // - 1日の終了時刻: dayEndMinute
+                    val newEveningStart = startHour * 60 + startMinute
+                    val newDayEnd = endHour * 60 + endMinute
+
+                    current.copy(
+                        eveningStartMinute = newEveningStart,
+                        dayEndMinute = newDayEnd,
+                        notifiedAtEndOfEvening = false
+                    )
+                }
             }
             saveAndLogSettings(updated)
         }
@@ -96,10 +122,20 @@ class ScheduleSettingsViewModel @Inject constructor(
     fun updateScheduleReminderTime(type: ScheduleType, hour: Int, minute: Int) {
         viewModelScope.launch {
             val current = repository.settingsFlow.first()
+            val reminderMinute = hour * 60 + minute
             val updated = when (type) {
-                ScheduleType.MORNING -> current.copy(morningReminderHour = hour, morningReminderMinute = minute, notifiedInSlotMorning = false)
-                ScheduleType.AFTERNOON -> current.copy(afternoonReminderHour = hour, afternoonReminderMinute = minute, notifiedInSlotAfternoon = false)
-                ScheduleType.EVENING -> current.copy(eveningReminderHour = hour, eveningReminderMinute = minute, notifiedInSlotEvening = false)
+                ScheduleType.MORNING -> current.copy(
+                    morningReminderMinute = reminderMinute,
+                    morningNotifiedInSlot = false
+                )
+                ScheduleType.AFTERNOON -> current.copy(
+                    afternoonReminderMinute = reminderMinute,
+                    afternoonNotifiedInSlot = false
+                )
+                ScheduleType.EVENING -> current.copy(
+                    eveningReminderMinute = reminderMinute,
+                    eveningNotifiedInSlot = false
+                )
             }
             saveAndLogSettings(updated)
         }
@@ -140,44 +176,43 @@ class ScheduleSettingsViewModel @Inject constructor(
             // 設定内容をダンプ
             logManager.addInfoLog("=== 設定変更・保存 ===")
             logManager.addInfoLog("■スケジュール")
-            logManager.addInfoLog("  朝: ${if (updated.morningEnabled) "有効" else "無効"} ${String.format("%02d:%02d-%02d:%02d", updated.morningStartHour, updated.morningStartMinute, updated.morningEndHour, updated.morningEndMinute)} (推奨: ${String.format("%02d:%02d", updated.morningReminderHour, updated.morningReminderMinute)})")
-            logManager.addInfoLog("  昼: ${if (updated.afternoonEnabled) "有効" else "無効"} ${String.format("%02d:%02d-%02d:%02d", updated.afternoonStartHour, updated.afternoonStartMinute, updated.afternoonEndHour, updated.afternoonEndMinute)} (推奨: ${String.format("%02d:%02d", updated.afternoonReminderHour, updated.afternoonReminderMinute)})")
-            logManager.addInfoLog("  夜: ${if (updated.eveningEnabled) "有効" else "無効"} ${String.format("%02d:%02d-%02d:%02d", updated.eveningStartHour, updated.eveningStartMinute, updated.eveningEndHour, updated.eveningEndMinute)} (推奨: ${String.format("%02d:%02d", updated.eveningReminderHour, updated.eveningReminderMinute)})")
+            logManager.addInfoLog("  朝: ${if (updated.morningEnabled) "有効" else "無効"} ${String.format("%02d:%02d-%02d:%02d", updated.morningStartMinute / 60, updated.morningStartMinute % 60, updated.afternoonStartMinute / 60, updated.afternoonStartMinute % 60)} (推奨: ${String.format("%02d:%02d", updated.morningReminderMinute / 60, updated.morningReminderMinute % 60)})")
+            logManager.addInfoLog("  昼: ${if (updated.afternoonEnabled) "有効" else "無効"} ${String.format("%02d:%02d-%02d:%02d", updated.afternoonStartMinute / 60, updated.afternoonStartMinute % 60, updated.eveningStartMinute / 60, updated.eveningStartMinute % 60)} (推奨: ${String.format("%02d:%02d", updated.afternoonReminderMinute / 60, updated.afternoonReminderMinute % 60)})")
+            logManager.addInfoLog("  夜: ${if (updated.eveningEnabled) "有効" else "無効"} ${String.format("%02d:%02d-%02d:%02d", updated.eveningStartMinute / 60, updated.eveningStartMinute % 60, updated.dayEndMinute / 60, updated.dayEndMinute % 60)} (推奨: ${String.format("%02d:%02d", updated.eveningReminderMinute / 60, updated.eveningReminderMinute % 60)})")
             logManager.addInfoLog("■通知")
             logManager.addInfoLog("  BLE接続時のみ通知: ${if (updated.onlyNotifyWhenBleConnected) "ON" else "OFF"}")
             logManager.addInfoLog("  リマインダー間隔: ${updated.notificationIntervalMinutes}分")
             logManager.addInfoLog("=====================")
+
+            // BLE接続中なら、マイコン側のINTAKEデータを再取得（リセット後のDBに反映）
+            if (bleManager.connectionState.value is BleManager.ConnectionState.Connected) {
+                logManager.addInfoLog("BLE接続中のため、INTAKE再取得を実行")
+                bleManager.getIntake()
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to save settings", e)
         }
     }
 
-    private fun resetTodayIntakeRecord() {
-        viewModelScope.launch {
-            val calendar = Calendar.getInstance()
-            calendar.set(Calendar.HOUR_OF_DAY, 0)
-            calendar.set(Calendar.MINUTE, 0)
-            calendar.set(Calendar.SECOND, 0)
-            calendar.set(Calendar.MILLISECOND, 0)
-            val todayStart = calendar.timeInMillis / 1000
+    private suspend fun resetTodayIntakeRecord() {
+        val todayStart = repository.getTodayStartTimestamp()
 
-            val existingRecord = repository.getIntakeRecordByDateSync(todayStart)
-            if (existingRecord != null) {
-                val currentSettings = repository.settingsFlow.first()
-                // 当日の記録が存在する場合はリセット（削除ではなく未服用状態に更新）
-                // 同時に、その時点での有効フラグも同期する
-                val resetRecord = existingRecord.copy(
-                    morningTaken = false, morningTime = 0L,
-                    morningEnabled = currentSettings.morningEnabled,
-                    afternoonTaken = false, afternoonTime = 0L,
-                    afternoonEnabled = currentSettings.afternoonEnabled,
-                    eveningTaken = false, eveningTime = 0L,
-                    eveningEnabled = currentSettings.eveningEnabled
-                )
-                repository.insertIntakeRecord(resetRecord)
-                logManager.addInfoLog("スケジュール変更に伴い、当日の服薬記録をリセットしました")
-                Log.d(TAG, "Today's intake record reset due to schedule change")
-            }
+        val existingRecord = repository.getIntakeRecordByDateSync(todayStart)
+        if (existingRecord != null) {
+            val currentSettings = repository.settingsFlow.first()
+            // 当日の記録が存在する場合はリセット（削除ではなく未服用状態に更新）
+            // 同時に、その時点での有効フラグも同期する
+            val resetRecord = existingRecord.copy(
+                morningTaken = false, morningTime = 0L,
+                morningEnabled = currentSettings.morningEnabled,
+                afternoonTaken = false, afternoonTime = 0L,
+                afternoonEnabled = currentSettings.afternoonEnabled,
+                eveningTaken = false, eveningTime = 0L,
+                eveningEnabled = currentSettings.eveningEnabled
+            )
+            repository.insertIntakeRecord(resetRecord)
+            logManager.addInfoLog("スケジュール変更に伴い、当日の服薬記録をリセットしました")
+            Log.d(TAG, "Today's intake record reset due to schedule change")
         }
     }
 }

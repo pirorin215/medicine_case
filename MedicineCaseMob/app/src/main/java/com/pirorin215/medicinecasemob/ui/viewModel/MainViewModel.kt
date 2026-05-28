@@ -112,17 +112,6 @@ class MainViewModel @Inject constructor(
         bleManager.syncTime()
     }
 
-    fun getTodayRecord(): MedicineIntakeRecord? {
-        val calendar = Calendar.getInstance()
-        calendar.set(Calendar.HOUR_OF_DAY, 0)
-        calendar.set(Calendar.MINUTE, 0)
-        calendar.set(Calendar.SECOND, 0)
-        calendar.set(Calendar.MILLISECOND, 0)
-        val todayStart = calendar.timeInMillis / 1000
-
-        return _intakeRecords.value.find { it.date == todayStart }
-    }
-
     // --- History selection ---
 
     fun enterSelectMode() {
@@ -153,8 +142,12 @@ class MainViewModel @Inject constructor(
         if (ids.isEmpty()) return
 
         viewModelScope.launch {
-            repository.deleteIntakeRecordsByIds(ids)
-            Log.d(TAG, "Deleted ${ids.size} intake records")
+            repository.clearIntakeRecordsByIds(ids)
+            Log.d(TAG, "Cleared ${ids.size} intake records")
+
+            // Re-fetch intake from BLE device to restore cleared records
+            bleManager.clearAndGetIntake()
+
             exitSelectMode()
         }
     }

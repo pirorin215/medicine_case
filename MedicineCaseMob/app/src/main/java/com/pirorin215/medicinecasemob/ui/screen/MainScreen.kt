@@ -94,8 +94,8 @@ fun MainScreen(
     if (showDeleteSelectedDialog) {
         AlertDialog(
             onDismissRequest = { showDeleteSelectedDialog = false },
-            title = { Text("履歴を削除") },
-            text = { Text("選択した${selectedRecordIds.size}件の服薬履歴を削除しますか？") },
+            title = { Text("服薬情報をクリア") },
+            text = { Text("選択した${selectedRecordIds.size}件の服薬情報をクリアしますか？\n（履歴は残ります）") },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -103,7 +103,7 @@ fun MainScreen(
                         showDeleteSelectedDialog = false
                     }
                 ) {
-                    Text("削除", color = MaterialTheme.colorScheme.error)
+                    Text("クリア", color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
@@ -228,7 +228,7 @@ fun MainScreen(
                                 }) {
                                     Icon(
                                         Icons.Default.Delete,
-                                        contentDescription = "削除",
+                                        contentDescription = "クリア",
                                         tint = if (selectedRecordIds.isNotEmpty())
                                             MaterialTheme.colorScheme.error
                                         else

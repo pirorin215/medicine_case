@@ -148,8 +148,12 @@ class DebugViewModel @Inject constructor(
 
     private fun observeIntakeHistory() {
         viewModelScope.launch {
-            bleManager.intakeEventHistory.collect { rawHistory ->
-                val schedules = _schedules.value
+            // Combine intake history with schedules to ensure schedules are loaded
+            combine(
+                bleManager.intakeEventHistory,
+                _schedules
+            ) { rawHistory, schedules ->
+                Log.d(TAG, "🔄 Processing history: ${rawHistory.size} events, ${schedules.size} schedules")
                 val enrichedHistory = rawHistory.map { event ->
                     val scheduleType = determineScheduleTypeForTimestamp(event.mcuTimestamp, schedules)
                     IntakeEventHistoryItem(
@@ -160,7 +164,9 @@ class DebugViewModel @Inject constructor(
                         wasRecorded = scheduleType != null
                     )
                 }
-                _intakeHistory.value = enrichedHistory
+                enrichedHistory
+            }.collect { history ->
+                _intakeHistory.value = history
             }
         }
     }
@@ -262,22 +268,20 @@ class DebugViewModel @Inject constructor(
     }
 
     private fun isTimeRelated(rawEvent: String): Boolean {
-        return rawEvent.contains("Time") ||
-               rawEvent.startsWith("SET:time:") ||
-               rawEvent.contains("synced")
+        return rawEvent.contains("time", ignoreCase = true) ||
+               rawEvent.contains("synced", ignoreCase = true)
     }
 
     private fun isDetectionRelated(rawEvent: String): Boolean {
-        return rawEvent.contains("Detection") ||
-               rawEvent.startsWith("SET:detection:") ||
-               rawEvent.contains("angle") ||
-               rawEvent.contains("cooldown")
+        return rawEvent.contains("detection", ignoreCase = true) ||
+               rawEvent.contains("angle", ignoreCase = true) ||
+               rawEvent.contains("cooldown", ignoreCase = true)
     }
 
     private fun isIntakeRelated(rawEvent: String): Boolean {
-        return rawEvent.startsWith("INTAKE:") ||
-               rawEvent == "NONE" ||
-               rawEvent.contains("Intake")
+        return rawEvent.startsWith("INTAKE:", ignoreCase = true) ||
+               rawEvent.equals("NONE", ignoreCase = true) ||
+               rawEvent.contains("intake", ignoreCase = true)
     }
 
     /**
@@ -295,6 +299,8 @@ class DebugViewModel @Inject constructor(
         val minute = cal.get(Calendar.MINUTE)
         val currentMinutes = hour * 60 + minute
 
+        Log.d(TAG, "Schedule determination: timestamp=$timestamp, hour=$hour, minute=$minute, schedules=${schedules.size}")
+
         for (schedule in schedules) {
             if (!schedule.enabled) continue
 
@@ -303,15 +309,18 @@ class DebugViewModel @Inject constructor(
 
             // Check if current time is within schedule range
             if (currentMinutes in startMinutes..endMinutes) {
-                return when (schedule.id) {
+                val result = when (schedule.id) {
                     0 -> ScheduleType.MORNING
                     1 -> ScheduleType.AFTERNOON
                     2 -> ScheduleType.EVENING
                     else -> null
                 }
+                Log.d(TAG, "Schedule match found: $result (schedule.id=${schedule.id})")
+                return result
             }
         }
 
+        Log.d(TAG, "No matching schedule found for currentMinutes=$currentMinutes")
         return null  // No matching schedule
     }
 

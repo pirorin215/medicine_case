@@ -33,4 +33,11 @@ interface MedicineDao {
 
     @Query("DELETE FROM intake_records WHERE date < :thresholdDate")
     suspend fun deleteOldRecords(thresholdDate: Long)
+
+    // Check if an intake with the given mcu timestamp already exists
+    @Query("SELECT * FROM intake_records WHERE morningTime = :mcuTimestamp OR afternoonTime = :mcuTimestamp OR eveningTime = :mcuTimestamp LIMIT 1")
+    suspend fun findRecordByMcuTime(mcuTimestamp: Long): MedicineIntakeRecord?
+
+    @Query("UPDATE intake_records SET morningTaken = 0, morningTime = 0, morningReceivedTime = 0, afternoonTaken = 0, afternoonTime = 0, afternoonReceivedTime = 0, eveningTaken = 0, eveningTime = 0, eveningReceivedTime = 0 WHERE id = :recordId")
+    suspend fun clearAllIntakes(recordId: Long)
 }

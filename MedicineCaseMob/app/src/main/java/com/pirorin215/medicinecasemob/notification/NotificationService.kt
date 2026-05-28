@@ -77,24 +77,20 @@ class NotificationService @Inject constructor(
 
             if (!alreadyTaken) {
                 val alreadyNotifiedInSlot = when (scheduleType) {
-                    ScheduleType.MORNING -> appSettings.notifiedInSlotMorning
-                    ScheduleType.AFTERNOON -> appSettings.notifiedInSlotAfternoon
-                    ScheduleType.EVENING -> appSettings.notifiedInSlotEvening
+                    ScheduleType.MORNING -> appSettings.morningNotifiedInSlot
+                    ScheduleType.AFTERNOON -> appSettings.afternoonNotifiedInSlot
+                    ScheduleType.EVENING -> appSettings.eveningNotifiedInSlot
                 }
 
                 if (!alreadyNotifiedInSlot) {
                     // Check triggers: BLE connect (force) OR Preferred Time reached
-                    val preferredHour = when (scheduleType) {
-                        ScheduleType.MORNING -> appSettings.morningReminderHour
-                        ScheduleType.AFTERNOON -> appSettings.afternoonReminderHour
-                        ScheduleType.EVENING -> appSettings.eveningReminderHour
-                    }
-                    val preferredMinute = when (scheduleType) {
+                    val preferredMinutes = when (scheduleType) {
                         ScheduleType.MORNING -> appSettings.morningReminderMinute
                         ScheduleType.AFTERNOON -> appSettings.afternoonReminderMinute
                         ScheduleType.EVENING -> appSettings.eveningReminderMinute
                     }
-                    val preferredMinutes = preferredHour * 60 + preferredMinute
+                    val preferredHour = preferredMinutes / 60
+                    val preferredMinute = preferredMinutes % 60
 
                     var shouldNotifyInSlot = false
                     if (forceNotification) {
@@ -107,12 +103,12 @@ class NotificationService @Inject constructor(
 
                     if (shouldNotifyInSlot) {
                         sendNotification(scheduleType, isInSlot = true)
-                        
+
                         // Update in-slot notification flag
                         when (scheduleType) {
-                            ScheduleType.MORNING -> repository.updateInSlotNotificationFlags(morning = true, afternoon = appSettings.notifiedInSlotAfternoon, evening = appSettings.notifiedInSlotEvening)
-                            ScheduleType.AFTERNOON -> repository.updateInSlotNotificationFlags(morning = appSettings.notifiedInSlotMorning, afternoon = true, evening = appSettings.notifiedInSlotEvening)
-                            ScheduleType.EVENING -> repository.updateInSlotNotificationFlags(morning = appSettings.notifiedInSlotMorning, afternoon = appSettings.notifiedInSlotAfternoon, evening = true)
+                            ScheduleType.MORNING -> repository.updateInSlotNotificationFlags(morning = true, afternoon = appSettings.afternoonNotifiedInSlot, evening = appSettings.eveningNotifiedInSlot)
+                            ScheduleType.AFTERNOON -> repository.updateInSlotNotificationFlags(morning = appSettings.morningNotifiedInSlot, afternoon = true, evening = appSettings.eveningNotifiedInSlot)
+                            ScheduleType.EVENING -> repository.updateInSlotNotificationFlags(morning = appSettings.morningNotifiedInSlot, afternoon = appSettings.afternoonNotifiedInSlot, evening = true)
                         }
                         repository.updateLastNotificationTimestamp(currentTimeSeconds.toLong())
                         return // Exit after sending in-slot notification
@@ -122,7 +118,20 @@ class NotificationService @Inject constructor(
         }
 
         // --- EXISTING: End-of-slot (Deadline) Notification Logic ---
-        // 2. Find the latest ended schedule to check
+        // 2. Check if there's an active (currently running) slot
+        val activeSchedule = enabledSchedules.firstOrNull { schedule ->
+            val startMinutes = schedule.startHour * 60 + schedule.startMinute
+            val endMinutes = schedule.endHour * 60 + schedule.endMinute
+            currentMinutes in startMinutes until endMinutes
+        }
+
+        // If there's an active slot, don't notify about previous slots
+        if (activeSchedule != null) {
+            logManager.d(TAG, "Active slot exists: ${ScheduleType.fromId(activeSchedule.id)}. Skipping notifications for previous slots.")
+            return
+        }
+
+        // 3. Find the latest ended schedule to check
         val latestEndedSchedule = enabledSchedules
             .filter { currentMinutes >= (it.endHour * 60 + it.endMinute) }
             .maxByOrNull { it.endHour * 60 + it.endMinute }

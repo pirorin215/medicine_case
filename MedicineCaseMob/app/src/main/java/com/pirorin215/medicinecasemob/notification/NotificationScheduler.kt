@@ -40,7 +40,7 @@ class NotificationScheduler @AssistedInject constructor(
                 repository.updateInSlotNotificationFlags(morning = false, afternoon = false, evening = false)
             }
 
-            // Ensure today's record exists and get it
+            // Ensure today's record exists and get it (single DB query)
             val todayRecord = repository.ensureTodayRecordExists()
 
             // Load settings from repository (DataStore)

@@ -14,20 +14,30 @@ class MedicineRepository(
     val settingsFlow: Flow<AppSettingsData> = preferenceManager.settingsFlow
 
     /**
-     * Ensures a record for today exists in the database.
-     * If not, creates one with current enabled flags from settings.
+     * 今日の0時0分のUnix秒タイムスタンプを取得するヘルパー。
+     * 複数箇所で重複していたCalendar初期化パターンを統一。
      */
-    suspend fun ensureTodayRecordExists(): MedicineIntakeRecord {
+    fun getTodayStartTimestamp(): Long {
         val calendar = Calendar.getInstance()
         calendar.set(Calendar.HOUR_OF_DAY, 0)
         calendar.set(Calendar.MINUTE, 0)
         calendar.set(Calendar.SECOND, 0)
         calendar.set(Calendar.MILLISECOND, 0)
-        val todayStart = calendar.timeInMillis / 1000
+        return calendar.timeInMillis / 1000
+    }
+
+    /**
+     * Ensures a record for today exists in the database.
+     * If not, creates one with current enabled flags from settings.
+     * Returns today's record (existing or newly created).
+     */
+    suspend fun ensureTodayRecordExists(): MedicineIntakeRecord {
+        val todayStart = getTodayStartTimestamp()
 
         val existing = medicineDao.getIntakeRecordByDateSync(todayStart)
         if (existing != null) return existing
 
+        // Create new record with current settings
         val settings = preferenceManager.settingsFlow.first()
         val newRecord = MedicineIntakeRecord(
             date = todayStart,
@@ -36,7 +46,7 @@ class MedicineRepository(
             eveningEnabled = settings.eveningEnabled
         )
         medicineDao.insertIntakeRecord(newRecord)
-        return newRecord
+        return medicineDao.getIntakeRecordByDateSync(todayStart) ?: newRecord
     }
 
     suspend fun updateSettings(settings: AppSettingsData) =
@@ -62,32 +72,32 @@ class MedicineRepository(
             MedicineSchedule(
                 id = ScheduleType.MORNING.id,
                 enabled = settings.morningEnabled,
-                startHour = settings.morningStartHour,
-                startMinute = settings.morningStartMinute,
-                endHour = settings.morningEndHour,
-                endMinute = settings.morningEndMinute,
-                reminderHour = settings.morningReminderHour,
-                reminderMinute = settings.morningReminderMinute
+                startHour = settings.morningStartMinute / 60,
+                startMinute = settings.morningStartMinute % 60,
+                endHour = settings.afternoonStartMinute / 60,
+                endMinute = settings.afternoonStartMinute % 60,
+                reminderHour = settings.morningReminderMinute / 60,
+                reminderMinute = settings.morningReminderMinute % 60
             ),
             MedicineSchedule(
                 id = ScheduleType.AFTERNOON.id,
                 enabled = settings.afternoonEnabled,
-                startHour = settings.afternoonStartHour,
-                startMinute = settings.afternoonStartMinute,
-                endHour = settings.afternoonEndHour,
-                endMinute = settings.afternoonEndMinute,
-                reminderHour = settings.afternoonReminderHour,
-                reminderMinute = settings.afternoonReminderMinute
+                startHour = settings.afternoonStartMinute / 60,
+                startMinute = settings.afternoonStartMinute % 60,
+                endHour = settings.eveningStartMinute / 60,
+                endMinute = settings.eveningStartMinute % 60,
+                reminderHour = settings.afternoonReminderMinute / 60,
+                reminderMinute = settings.afternoonReminderMinute % 60
             ),
             MedicineSchedule(
                 id = ScheduleType.EVENING.id,
                 enabled = settings.eveningEnabled,
-                startHour = settings.eveningStartHour,
-                startMinute = settings.eveningStartMinute,
-                endHour = settings.eveningEndHour,
-                endMinute = settings.eveningEndMinute,
-                reminderHour = settings.eveningReminderHour,
-                reminderMinute = settings.eveningReminderMinute
+                startHour = settings.eveningStartMinute / 60,
+                startMinute = settings.eveningStartMinute % 60,
+                endHour = settings.dayEndMinute / 60,
+                endMinute = settings.dayEndMinute % 60,
+                reminderHour = settings.eveningReminderMinute / 60,
+                reminderMinute = settings.eveningReminderMinute % 60
             )
         )
     }
@@ -115,4 +125,19 @@ class MedicineRepository(
 
     suspend fun deleteOldRecords(thresholdDate: Long) =
         medicineDao.deleteOldRecords(thresholdDate)
+
+    /**
+     * Check if an intake with the given mcu timestamp already exists in any record.
+     * Used for duplicate detection instead of in-memory set.
+     */
+    suspend fun isMcuTimestampRecorded(mcuTimestamp: Long): Boolean {
+        if (mcuTimestamp == 0L) return false
+        return medicineDao.findRecordByMcuTime(mcuTimestamp) != null
+    }
+
+    suspend fun clearIntakeRecordsByIds(ids: List<Long>) {
+        ids.forEach { recordId ->
+            medicineDao.clearAllIntakes(recordId)
+        }
+    }
 }
