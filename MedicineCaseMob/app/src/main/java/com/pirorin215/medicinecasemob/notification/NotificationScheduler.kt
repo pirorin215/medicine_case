@@ -36,8 +36,7 @@ class NotificationScheduler @AssistedInject constructor(
             // Reset notification flags at midnight
             if (currentHour == 0) {
                 LogManager.getInstance().d(TAG, "Resetting notification flags at midnight")
-                repository.updateEndNotificationFlags(morning = false, afternoon = false, evening = false)
-                repository.updateInSlotNotificationFlags(morning = false, afternoon = false, evening = false)
+                repository.resetDailyNotificationFlags()
             }
 
             // Ensure today's record exists and get it (single DB query)

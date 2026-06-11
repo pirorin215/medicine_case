@@ -117,9 +117,7 @@ class BleManager @Inject constructor(
             val device = result.device
             if (device.name?.startsWith(DEVICE_NAME_PREFIX) == true) {
                 logManager.d(TAG, "Found device: ${device.name} (${device.address})")
-                val updatedResults = _scanResults.value.toMutableList()
-                updatedResults.add(result)
-                _scanResults.value = updatedResults
+                addScanResult(result)
             }
         }
 
@@ -128,10 +126,7 @@ class BleManager @Inject constructor(
                 val device = result.device
                 if (device.name?.startsWith(DEVICE_NAME_PREFIX) == true) {
                     logManager.d(TAG, "Found device in batch: ${device.name} (${device.address})")
-                    // デバイスを_scanResultsに追加（onScanResultと同じ処理）
-                    val updatedResults = _scanResults.value.toMutableList()
-                    updatedResults.add(result)
-                    _scanResults.value = updatedResults
+                    addScanResult(result)
                 }
             }
         }
@@ -140,6 +135,16 @@ class BleManager @Inject constructor(
             logManager.e(TAG, "Scan failed: $errorCode")
             stopScan()
         }
+    }
+
+    /**
+     * スキャン結果を_scanResultsに追加する共通メソッド。
+     * onScanResult/onBatchScanResultsの両方から呼ばれる。
+     */
+    private fun addScanResult(result: ScanResult) {
+        val updatedResults = _scanResults.value.toMutableList()
+        updatedResults.add(result)
+        _scanResults.value = updatedResults
     }
 
     private val gattCallback = object : BluetoothGattCallback() {

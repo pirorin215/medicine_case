@@ -7,6 +7,8 @@ import com.pirorin215.medicinecasemob.ble.BleManager
 import com.pirorin215.medicinecasemob.ui.data.AppSettingsData
 import com.pirorin215.medicinecasemob.ui.data.MedicineSchedule
 import com.pirorin215.medicinecasemob.ui.data.ScheduleType
+import com.pirorin215.medicinecasemob.ui.data.formatTimeOfDay
+import com.pirorin215.medicinecasemob.ui.data.formatTimeRange
 import com.pirorin215.medicinecasemob.util.LogManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -176,9 +178,9 @@ class ScheduleSettingsViewModel @Inject constructor(
             // 設定内容をダンプ
             logManager.addInfoLog("=== 設定変更・保存 ===")
             logManager.addInfoLog("■スケジュール")
-            logManager.addInfoLog("  朝: ${if (updated.morningEnabled) "有効" else "無効"} ${String.format("%02d:%02d-%02d:%02d", updated.morningStartMinute / 60, updated.morningStartMinute % 60, updated.afternoonStartMinute / 60, updated.afternoonStartMinute % 60)} (推奨: ${String.format("%02d:%02d", updated.morningReminderMinute / 60, updated.morningReminderMinute % 60)})")
-            logManager.addInfoLog("  昼: ${if (updated.afternoonEnabled) "有効" else "無効"} ${String.format("%02d:%02d-%02d:%02d", updated.afternoonStartMinute / 60, updated.afternoonStartMinute % 60, updated.eveningStartMinute / 60, updated.eveningStartMinute % 60)} (推奨: ${String.format("%02d:%02d", updated.afternoonReminderMinute / 60, updated.afternoonReminderMinute % 60)})")
-            logManager.addInfoLog("  夜: ${if (updated.eveningEnabled) "有効" else "無効"} ${String.format("%02d:%02d-%02d:%02d", updated.eveningStartMinute / 60, updated.eveningStartMinute % 60, updated.dayEndMinute / 60, updated.dayEndMinute % 60)} (推奨: ${String.format("%02d:%02d", updated.eveningReminderMinute / 60, updated.eveningReminderMinute % 60)})")
+            logManager.addInfoLog("  朝: ${if (updated.morningEnabled) "有効" else "無効"} ${formatTimeRange(updated.morningStartMinute, updated.afternoonStartMinute)} (推奨: ${updated.morningReminderMinute.formatTimeOfDay()})")
+            logManager.addInfoLog("  昼: ${if (updated.afternoonEnabled) "有効" else "無効"} ${formatTimeRange(updated.afternoonStartMinute, updated.eveningStartMinute)} (推奨: ${updated.afternoonReminderMinute.formatTimeOfDay()})")
+            logManager.addInfoLog("  夜: ${if (updated.eveningEnabled) "有効" else "無効"} ${formatTimeRange(updated.eveningStartMinute, updated.dayEndMinute)} (推奨: ${updated.eveningReminderMinute.formatTimeOfDay()})")
             logManager.addInfoLog("■通知")
             logManager.addInfoLog("  BLE接続時のみ通知: ${if (updated.onlyNotifyWhenBleConnected) "ON" else "OFF"}")
             logManager.addInfoLog("  リマインダー間隔: ${updated.notificationIntervalMinutes}分")

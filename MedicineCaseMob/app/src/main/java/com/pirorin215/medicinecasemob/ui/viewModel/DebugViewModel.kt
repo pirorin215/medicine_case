@@ -125,12 +125,7 @@ class DebugViewModel @Inject constructor(
 
     private fun loadTodayRecord() {
         viewModelScope.launch {
-            val calendar = Calendar.getInstance()
-            calendar.set(Calendar.HOUR_OF_DAY, 0)
-            calendar.set(Calendar.MINUTE, 0)
-            calendar.set(Calendar.SECOND, 0)
-            calendar.set(Calendar.MILLISECOND, 0)
-            val todayStart = calendar.timeInMillis / 1000
+            val todayStart = repository.getTodayStartTimestamp()
 
             repository.getAllIntakeRecords().collect { records ->
                 _todayRecord.value = records.find { it.date == todayStart }
@@ -304,8 +299,8 @@ class DebugViewModel @Inject constructor(
         for (schedule in schedules) {
             if (!schedule.enabled) continue
 
-            val startMinutes = schedule.startHour * 60 + schedule.startMinute
-            val endMinutes = schedule.endHour * 60 + schedule.endMinute
+            val startMinutes = schedule.startMinuteOfDay
+            val endMinutes = schedule.endMinuteOfDay
 
             // Check if current time is within schedule range
             if (currentMinutes in startMinutes..endMinutes) {

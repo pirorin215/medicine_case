@@ -97,106 +97,100 @@ class PreferenceManager @Inject constructor(private val context: Context) {
             val needsMigration = morningStart == null || afternoonStart == null ||
                                 eveningStart == null || dayEnd == null
 
-            if (needsMigration) {
+            // Determine slot boundaries
+            val slotBoundaries = if (needsMigration) {
                 // Migrate from legacy hour/minute format to minute-based format
                 val legacyMorningStartHour = preferences[PreferencesKeys.LEGACY_MORNING_START_HOUR] ?: 8
                 val legacyMorningStartMin = preferences[PreferencesKeys.LEGACY_MORNING_START_MINUTE] ?: 0
-                val legacyMorningEndHour = preferences[PreferencesKeys.LEGACY_MORNING_END_HOUR] ?: 11
-                val legacyMorningEndMin = preferences[PreferencesKeys.LEGACY_MORNING_END_MINUTE] ?: 0
-
                 val legacyAfternoonStartHour = preferences[PreferencesKeys.LEGACY_AFTERNOON_START_HOUR] ?: 11
                 val legacyAfternoonStartMin = preferences[PreferencesKeys.LEGACY_AFTERNOON_START_MINUTE] ?: 0
-                val legacyAfternoonEndHour = preferences[PreferencesKeys.LEGACY_AFTERNOON_END_HOUR] ?: 17
-                val legacyAfternoonEndMin = preferences[PreferencesKeys.LEGACY_AFTERNOON_END_MINUTE] ?: 0
-
                 val legacyEveningStartHour = preferences[PreferencesKeys.LEGACY_EVENING_START_HOUR] ?: 17
                 val legacyEveningStartMin = preferences[PreferencesKeys.LEGACY_EVENING_START_MINUTE] ?: 0
                 val legacyEveningEndHour = preferences[PreferencesKeys.LEGACY_EVENING_END_HOUR] ?: 23
                 val legacyEveningEndMin = preferences[PreferencesKeys.LEGACY_EVENING_END_MINUTE] ?: 0
 
-                val migratedMorningStart = legacyMorningStartHour * 60 + legacyMorningStartMin
-                val migratedAfternoonStart = legacyAfternoonStartHour * 60 + legacyAfternoonStartMin
-                val migratedEveningStart = legacyEveningStartHour * 60 + legacyEveningStartMin
-                val migratedDayEnd = legacyEveningEndHour * 60 + legacyEveningEndMin
-
-                AppSettingsData(
-                    morningEnabled = preferences[PreferencesKeys.MORNING_ENABLED] ?: true,
-                    morningReminderMinute = preferences[PreferencesKeys.MORNING_REMINDER_MINUTE] ?:
-                        (preferences[PreferencesKeys.LEGACY_MORNING_REMINDER_HOUR] ?: 9) * 60 +
-                        (preferences[PreferencesKeys.LEGACY_MORNING_REMINDER_MINUTE] ?: 0),
-
-                    afternoonEnabled = preferences[PreferencesKeys.AFTERNOON_ENABLED] ?: true,
-                    afternoonReminderMinute = preferences[PreferencesKeys.AFTERNOON_REMINDER_MINUTE] ?:
-                        (preferences[PreferencesKeys.LEGACY_AFTERNOON_REMINDER_HOUR] ?: 13) * 60 +
-                        (preferences[PreferencesKeys.LEGACY_AFTERNOON_REMINDER_MINUTE] ?: 0),
-
-                    eveningEnabled = preferences[PreferencesKeys.EVENING_ENABLED] ?: true,
-                    eveningReminderMinute = preferences[PreferencesKeys.EVENING_REMINDER_MINUTE] ?:
-                        (preferences[PreferencesKeys.LEGACY_EVENING_REMINDER_HOUR] ?: 20) * 60 +
-                        (preferences[PreferencesKeys.LEGACY_EVENING_REMINDER_MINUTE] ?: 0),
-
-                    morningStartMinute = migratedMorningStart,
-                    afternoonStartMinute = migratedAfternoonStart,
-                    eveningStartMinute = migratedEveningStart,
-                    dayEndMinute = migratedDayEnd,
-
-                    onlyNotifyWhenBleConnected = preferences[PreferencesKeys.ONLY_NOTIFY_WHEN_BLE_CONNECTED] ?: false,
-                    notificationIntervalMinutes = preferences[PreferencesKeys.NOTIFICATION_INTERVAL_MINUTES] ?: 60,
-                    lastNotificationTimestamp = preferences[PreferencesKeys.LAST_NOTIFICATION_TIMESTAMP]?.toInt() ?: 0,
-
-                    movementThreshold = preferences[PreferencesKeys.MOVEMENT_THRESHOLD] ?: 70.0f,
-                    cooldownTime = preferences[PreferencesKeys.COOLDOWN_TIME] ?: 30000L,
-
-                    uiFontSizeScale = preferences[PreferencesKeys.UI_FONT_SIZE_SCALE] ?: 1.2f,
-
-                    notifiedAtEndOfMorning = preferences[PreferencesKeys.NOTIFIED_AT_END_OF_MORNING] ?: false,
-                    notifiedAtEndOfAfternoon = preferences[PreferencesKeys.NOTIFIED_AT_END_OF_AFTERNOON] ?: false,
-                    notifiedAtEndOfEvening = preferences[PreferencesKeys.NOTIFIED_AT_END_OF_EVENING] ?: false,
-
-                    morningNotifiedInSlot = preferences[PreferencesKeys.NOTIFIED_IN_SLOT_MORNING] ?: false,
-                    afternoonNotifiedInSlot = preferences[PreferencesKeys.NOTIFIED_IN_SLOT_AFTERNOON] ?: false,
-                    eveningNotifiedInSlot = preferences[PreferencesKeys.NOTIFIED_IN_SLOT_EVENING] ?: false,
-
-                    lastDeviceAddress = preferences[PreferencesKeys.LAST_DEVICE_ADDRESS]
+                SlotBoundaries(
+                    morningStart = legacyMorningStartHour * 60 + legacyMorningStartMin,
+                    afternoonStart = legacyAfternoonStartHour * 60 + legacyAfternoonStartMin,
+                    eveningStart = legacyEveningStartHour * 60 + legacyEveningStartMin,
+                    dayEnd = legacyEveningEndHour * 60 + legacyEveningEndMin
                 )
             } else {
-                // Use new minute-based values
-                AppSettingsData(
-                    morningEnabled = preferences[PreferencesKeys.MORNING_ENABLED] ?: true,
-                    morningReminderMinute = preferences[PreferencesKeys.MORNING_REMINDER_MINUTE] ?: 9 * 60,
-                    morningStartMinute = morningStart,
-
-                    afternoonEnabled = preferences[PreferencesKeys.AFTERNOON_ENABLED] ?: true,
-                    afternoonReminderMinute = preferences[PreferencesKeys.AFTERNOON_REMINDER_MINUTE] ?: 13 * 60,
-                    afternoonStartMinute = afternoonStart,
-
-                    eveningEnabled = preferences[PreferencesKeys.EVENING_ENABLED] ?: true,
-                    eveningReminderMinute = preferences[PreferencesKeys.EVENING_REMINDER_MINUTE] ?: 20 * 60,
-                    eveningStartMinute = eveningStart,
-
-                    dayEndMinute = dayEnd,
-
-                    onlyNotifyWhenBleConnected = preferences[PreferencesKeys.ONLY_NOTIFY_WHEN_BLE_CONNECTED] ?: false,
-                    notificationIntervalMinutes = preferences[PreferencesKeys.NOTIFICATION_INTERVAL_MINUTES] ?: 60,
-                    lastNotificationTimestamp = preferences[PreferencesKeys.LAST_NOTIFICATION_TIMESTAMP]?.toInt() ?: 0,
-
-                    movementThreshold = preferences[PreferencesKeys.MOVEMENT_THRESHOLD] ?: 70.0f,
-                    cooldownTime = preferences[PreferencesKeys.COOLDOWN_TIME] ?: 30000L,
-
-                    uiFontSizeScale = preferences[PreferencesKeys.UI_FONT_SIZE_SCALE] ?: 1.2f,
-
-                    notifiedAtEndOfMorning = preferences[PreferencesKeys.NOTIFIED_AT_END_OF_MORNING] ?: false,
-                    notifiedAtEndOfAfternoon = preferences[PreferencesKeys.NOTIFIED_AT_END_OF_AFTERNOON] ?: false,
-                    notifiedAtEndOfEvening = preferences[PreferencesKeys.NOTIFIED_AT_END_OF_EVENING] ?: false,
-
-                    morningNotifiedInSlot = preferences[PreferencesKeys.NOTIFIED_IN_SLOT_MORNING] ?: false,
-                    afternoonNotifiedInSlot = preferences[PreferencesKeys.NOTIFIED_IN_SLOT_AFTERNOON] ?: false,
-                    eveningNotifiedInSlot = preferences[PreferencesKeys.NOTIFIED_IN_SLOT_EVENING] ?: false,
-
-                    lastDeviceAddress = preferences[PreferencesKeys.LAST_DEVICE_ADDRESS]
+                SlotBoundaries(
+                    morningStart = morningStart!!,
+                    afternoonStart = afternoonStart!!,
+                    eveningStart = eveningStart!!,
+                    dayEnd = dayEnd!!
                 )
             }
+
+            // Determine reminder times
+            val morningReminder = if (needsMigration) {
+                preferences[PreferencesKeys.MORNING_REMINDER_MINUTE]
+                    ?: (preferences[PreferencesKeys.LEGACY_MORNING_REMINDER_HOUR] ?: 9) * 60 +
+                       (preferences[PreferencesKeys.LEGACY_MORNING_REMINDER_MINUTE] ?: 0)
+            } else {
+                preferences[PreferencesKeys.MORNING_REMINDER_MINUTE] ?: 9 * 60
+            }
+            val afternoonReminder = if (needsMigration) {
+                preferences[PreferencesKeys.AFTERNOON_REMINDER_MINUTE]
+                    ?: (preferences[PreferencesKeys.LEGACY_AFTERNOON_REMINDER_HOUR] ?: 13) * 60 +
+                       (preferences[PreferencesKeys.LEGACY_AFTERNOON_REMINDER_MINUTE] ?: 0)
+            } else {
+                preferences[PreferencesKeys.AFTERNOON_REMINDER_MINUTE] ?: 13 * 60
+            }
+            val eveningReminder = if (needsMigration) {
+                preferences[PreferencesKeys.EVENING_REMINDER_MINUTE]
+                    ?: (preferences[PreferencesKeys.LEGACY_EVENING_REMINDER_HOUR] ?: 20) * 60 +
+                       (preferences[PreferencesKeys.LEGACY_EVENING_REMINDER_MINUTE] ?: 0)
+            } else {
+                preferences[PreferencesKeys.EVENING_REMINDER_MINUTE] ?: 20 * 60
+            }
+
+            // Build common fields once
+            AppSettingsData(
+                morningEnabled = preferences[PreferencesKeys.MORNING_ENABLED] ?: true,
+                morningReminderMinute = morningReminder,
+                morningStartMinute = slotBoundaries.morningStart,
+
+                afternoonEnabled = preferences[PreferencesKeys.AFTERNOON_ENABLED] ?: true,
+                afternoonReminderMinute = afternoonReminder,
+                afternoonStartMinute = slotBoundaries.afternoonStart,
+
+                eveningEnabled = preferences[PreferencesKeys.EVENING_ENABLED] ?: true,
+                eveningReminderMinute = eveningReminder,
+                eveningStartMinute = slotBoundaries.eveningStart,
+
+                dayEndMinute = slotBoundaries.dayEnd,
+
+                onlyNotifyWhenBleConnected = preferences[PreferencesKeys.ONLY_NOTIFY_WHEN_BLE_CONNECTED] ?: false,
+                notificationIntervalMinutes = preferences[PreferencesKeys.NOTIFICATION_INTERVAL_MINUTES] ?: 60,
+                lastNotificationTimestamp = preferences[PreferencesKeys.LAST_NOTIFICATION_TIMESTAMP]?.toInt() ?: 0,
+
+                movementThreshold = preferences[PreferencesKeys.MOVEMENT_THRESHOLD] ?: 70.0f,
+                cooldownTime = preferences[PreferencesKeys.COOLDOWN_TIME] ?: 30000L,
+
+                uiFontSizeScale = preferences[PreferencesKeys.UI_FONT_SIZE_SCALE] ?: 1.2f,
+
+                notifiedAtEndOfMorning = preferences[PreferencesKeys.NOTIFIED_AT_END_OF_MORNING] ?: false,
+                notifiedAtEndOfAfternoon = preferences[PreferencesKeys.NOTIFIED_AT_END_OF_AFTERNOON] ?: false,
+                notifiedAtEndOfEvening = preferences[PreferencesKeys.NOTIFIED_AT_END_OF_EVENING] ?: false,
+
+                morningNotifiedInSlot = preferences[PreferencesKeys.NOTIFIED_IN_SLOT_MORNING] ?: false,
+                afternoonNotifiedInSlot = preferences[PreferencesKeys.NOTIFIED_IN_SLOT_AFTERNOON] ?: false,
+                eveningNotifiedInSlot = preferences[PreferencesKeys.NOTIFIED_IN_SLOT_EVENING] ?: false,
+
+                lastDeviceAddress = preferences[PreferencesKeys.LAST_DEVICE_ADDRESS]
+            )
         }
+
+    /** 枠境界データ（内部移行用） */
+    private data class SlotBoundaries(
+        val morningStart: Int,
+        val afternoonStart: Int,
+        val eveningStart: Int,
+        val dayEnd: Int
+    )
 
     suspend fun updateSettings(settings: AppSettingsData) {
         context.dataStore.edit { preferences ->

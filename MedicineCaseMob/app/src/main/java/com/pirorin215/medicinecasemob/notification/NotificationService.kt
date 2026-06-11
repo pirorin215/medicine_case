@@ -55,25 +55,19 @@ class NotificationService @Inject constructor(
         val secondsSinceLastNotification = currentTimeSeconds - lastNotificationTime
 
         // 1. Get all enabled schedules sorted by end time (descending)
-        val enabledSchedules = schedules.filter { it.enabled }.sortedByDescending { it.endHour * 60 + it.endMinute }
+        val enabledSchedules = schedules.filter { it.enabled }.sortedByDescending { it.endMinuteOfDay }
 
         // --- NEW: In-slot (Intelligent) Notification Logic ---
         // Find if we are currently WITHIN an active slot
         val currentSlot = enabledSchedules.find {
-            val startMinutes = it.startHour * 60 + it.startMinute
-            val endMinutes = it.endHour * 60 + it.endMinute
-            currentMinutes in startMinutes until endMinutes
+            currentMinutes in it.startMinuteOfDay until it.endMinuteOfDay
         }
 
         if (currentSlot != null) {
             val scheduleType = ScheduleType.fromId(currentSlot.id) ?: return
             
             // Check if already taken
-            val alreadyTaken = when (scheduleType) {
-                ScheduleType.MORNING -> todayRecord?.morningTaken == true
-                ScheduleType.AFTERNOON -> todayRecord?.afternoonTaken == true
-                ScheduleType.EVENING -> todayRecord?.eveningTaken == true
-            }
+            val alreadyTaken = todayRecord?.isTaken(scheduleType) == true
 
             if (!alreadyTaken) {
                 val alreadyNotifiedInSlot = when (scheduleType) {
@@ -120,9 +114,7 @@ class NotificationService @Inject constructor(
         // --- EXISTING: End-of-slot (Deadline) Notification Logic ---
         // 2. Check if there's an active (currently running) slot
         val activeSchedule = enabledSchedules.firstOrNull { schedule ->
-            val startMinutes = schedule.startHour * 60 + schedule.startMinute
-            val endMinutes = schedule.endHour * 60 + schedule.endMinute
-            currentMinutes in startMinutes until endMinutes
+            currentMinutes in schedule.startMinuteOfDay until schedule.endMinuteOfDay
         }
 
         // If there's an active slot, don't notify about previous slots
@@ -133,19 +125,15 @@ class NotificationService @Inject constructor(
 
         // 3. Find the latest ended schedule to check
         val latestEndedSchedule = enabledSchedules
-            .filter { currentMinutes >= (it.endHour * 60 + it.endMinute) }
-            .maxByOrNull { it.endHour * 60 + it.endMinute }
+            .filter { currentMinutes >= it.endMinuteOfDay }
+            .maxByOrNull { it.endMinuteOfDay }
 
         if (latestEndedSchedule == null) return
 
         val scheduleType = ScheduleType.fromId(latestEndedSchedule.id) ?: return
 
         // 3. Check if already taken
-        val alreadyTaken = when (scheduleType) {
-            ScheduleType.MORNING -> todayRecord?.morningTaken == true
-            ScheduleType.AFTERNOON -> todayRecord?.afternoonTaken == true
-            ScheduleType.EVENING -> todayRecord?.eveningTaken == true
-        }
+        val alreadyTaken = todayRecord?.isTaken(scheduleType) == true
 
         if (alreadyTaken) {
             logManager.d(TAG, "Schedule $scheduleType already taken. No notification.")

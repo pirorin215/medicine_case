@@ -140,4 +140,13 @@ class MedicineRepository(
             medicineDao.clearAllIntakes(recordId)
         }
     }
+
+    /**
+     * 真夜中（0時）に通知フラグをリセットする。
+     * MedicineBleScanService と NotificationScheduler の両方で使用。
+     */
+    suspend fun resetDailyNotificationFlags() {
+        updateEndNotificationFlags(morning = false, afternoon = false, evening = false)
+        updateInSlotNotificationFlags(morning = false, afternoon = false, evening = false)
+    }
 }

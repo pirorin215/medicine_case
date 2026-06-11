@@ -198,35 +198,13 @@ class MedicineBleScanService : Service() {
         val todayRecord = repository.ensureTodayRecordExists()
 
         // Check already taken using FRESH data from DB
-        val alreadyTaken = when (scheduleType) {
-            com.pirorin215.medicinecasemob.ui.data.ScheduleType.MORNING -> todayRecord.morningTaken
-            com.pirorin215.medicinecasemob.ui.data.ScheduleType.AFTERNOON -> todayRecord.afternoonTaken
-            com.pirorin215.medicinecasemob.ui.data.ScheduleType.EVENING -> todayRecord.eveningTaken
-        }
-
-        if (alreadyTaken) {
+        if (todayRecord.isTaken(scheduleType)) {
             logManager.d(TAG, "Ignoring intake: already recorded for $scheduleType")
             return
         }
 
         // Record using FRESH data from DB
-        val updatedRecord = when (scheduleType) {
-            com.pirorin215.medicinecasemob.ui.data.ScheduleType.MORNING -> todayRecord.copy(
-                morningTaken = true,
-                morningTime = mcuTimestamp,              // マイコン時刻
-                morningReceivedTime = phoneTimestamp     // スマホ受信時刻
-            )
-            com.pirorin215.medicinecasemob.ui.data.ScheduleType.AFTERNOON -> todayRecord.copy(
-                afternoonTaken = true,
-                afternoonTime = mcuTimestamp,            // マイコン時刻
-                afternoonReceivedTime = phoneTimestamp   // スマホ受信時刻
-            )
-            com.pirorin215.medicinecasemob.ui.data.ScheduleType.EVENING -> todayRecord.copy(
-                eveningTaken = true,
-                eveningTime = mcuTimestamp,             // マイコン時刻
-                eveningReceivedTime = phoneTimestamp    // スマホ受信時刻
-            )
-        }
+        val updatedRecord = todayRecord.withTaken(scheduleType, mcuTimestamp, phoneTimestamp)
 
         repository.insertIntakeRecord(updatedRecord)
         logManager.d(TAG, "Intake recorded: $scheduleType mcu_time=$mcuTimestamp, phone_received=$phoneTimestamp")
@@ -453,24 +431,13 @@ class MedicineBleScanService : Service() {
             // Reset notification flags at midnight
             if (currentHour == 0) {
                 logManager.d(TAG, "Resetting notification flags at midnight")
-                repository.updateEndNotificationFlags(morning = false, afternoon = false, evening = false)
-                repository.updateInSlotNotificationFlags(morning = false, afternoon = false, evening = false)
+                repository.resetDailyNotificationFlags()
             }
 
             val isConnected = bleManager.connectionState.value is BleManager.ConnectionState.Connected
 
-            // BLE接続中なら、通知判定前に最新の服薬状態を取得してDBを最新化
-            // これにより「既に服薬済みなのに通知が送られる」問題を防ぐ
-            if (isConnected && bleManager.serviceReady.value) {
-                val intakeResult = bleManager.queryIntake(timeoutMs = 2000L)
-                if (intakeResult != null) {
-                    logManager.d(TAG, "Pre-notification intake query: $intakeResult")
-                    // ObserverがDB更新するのを待つ
-                    delay(500)
-                }
-            }
-
-            // DBから最新の服薬記録を取得（BLE query反映済み）
+            // DBから最新の服薬記録を取得
+            // （ポーリング or サービス接続時の queryIntake で既にDBは最新化されている）
             val todayRecord = repository.ensureTodayRecordExists()
 
             // Load settings from repository
@@ -495,22 +462,10 @@ class MedicineBleScanService : Service() {
      * @return true: 未服薬の枠あり（ポーリング必要）, false: 服薬済み or 該当枠なし（スキップ）
      */
     private suspend fun shouldPollIntake(): Boolean {
-        val calendar = Calendar.getInstance()
-        val currentMinutes = calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE)
-
-        // 有効スケジュールから現在時刻に該当する枠を特定
-        val settings = repository.settingsFlow.first()
-        val schedules = repository.getSchedulesFromSettings(settings)
-        val currentSlot = schedules
-            .filter { it.enabled }
-            .find {
-                val startMinutes = it.startHour * 60 + it.startMinute
-                val endMinutes = it.endHour * 60 + it.endMinute
-                currentMinutes in startMinutes until endMinutes
-            }
-
-        // 該当枠なし → 活動時間外
-        if (currentSlot == null) {
+        // getCurrentSlot() を再利用してスケジュール検索の重複を排除
+        val currentSlot = getCurrentSlot() ?: run {
+            val calendar = Calendar.getInstance()
+            val currentMinutes = calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE)
             logManager.d(TAG, "shouldPollIntake: no active slot at $currentMinutes -> skip")
             return false
         }
@@ -520,11 +475,7 @@ class MedicineBleScanService : Service() {
         val todayRecord = repository.getIntakeRecordByDateSync(todayStart)
 
         val scheduleType = com.pirorin215.medicinecasemob.ui.data.ScheduleType.fromId(currentSlot.id) ?: return false
-        val isTaken = when (scheduleType) {
-            com.pirorin215.medicinecasemob.ui.data.ScheduleType.MORNING -> todayRecord?.morningTaken == true
-            com.pirorin215.medicinecasemob.ui.data.ScheduleType.AFTERNOON -> todayRecord?.afternoonTaken == true
-            com.pirorin215.medicinecasemob.ui.data.ScheduleType.EVENING -> todayRecord?.eveningTaken == true
-        }
+        val isTaken = todayRecord?.isTaken(scheduleType) == true
 
         logManager.d(TAG, "shouldPollIntake: slot=$scheduleType, taken=$isTaken -> ${if (!isTaken) "poll" else "skip"}")
         return !isTaken
@@ -591,11 +542,7 @@ class MedicineBleScanService : Service() {
 
         return schedules
             .filter { it.enabled }
-            .find {
-                val startMinutes = it.startHour * 60 + it.startMinute
-                val endMinutes = it.endHour * 60 + it.endMinute
-                currentMinutes in startMinutes until endMinutes
-            }
+            .find { currentMinutes in it.startMinuteOfDay until it.endMinuteOfDay }
     }
 
     /**
@@ -607,11 +554,7 @@ class MedicineBleScanService : Service() {
 
         val scheduleType = com.pirorin215.medicinecasemob.ui.data.ScheduleType.fromId(slot.id) ?: return false
 
-        return when (scheduleType) {
-            com.pirorin215.medicinecasemob.ui.data.ScheduleType.MORNING -> todayRecord.morningTaken
-            com.pirorin215.medicinecasemob.ui.data.ScheduleType.AFTERNOON -> todayRecord.afternoonTaken
-            com.pirorin215.medicinecasemob.ui.data.ScheduleType.EVENING -> todayRecord.eveningTaken
-        }
+        return todayRecord.isTaken(scheduleType)
     }
 
 }

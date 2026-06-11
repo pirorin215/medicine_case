@@ -9,7 +9,16 @@ data class MedicineSchedule(
     val endMinute: Int,
     val reminderHour: Int,
     val reminderMinute: Int
-)
+) {
+    /** 開始時刻の日中分 (例: 8:30 → 510) */
+    val startMinuteOfDay: Int get() = startHour * 60 + startMinute
+
+    /** 終了時刻の日中分 (例: 11:00 → 660) */
+    val endMinuteOfDay: Int get() = endHour * 60 + endMinute
+
+    /** リマインダー時刻の日中分 (例: 9:00 → 540) */
+    val reminderMinuteOfDay: Int get() = reminderHour * 60 + reminderMinute
+}
 
 enum class ScheduleType(val id: Int, val displayName: String, val defaultStartHour: Int, val defaultStartMinute: Int, val defaultEndHour: Int, val defaultEndMinute: Int) {
     MORNING(0, "朝", 8, 0, 11, 0),
