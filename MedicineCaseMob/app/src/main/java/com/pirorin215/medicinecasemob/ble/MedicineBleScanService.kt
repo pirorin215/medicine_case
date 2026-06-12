@@ -456,17 +456,17 @@ class MedicineBleScanService : Service() {
     }
 
     /**
-     * 現在時刻に該当するスケジュール枠が未服薬かどうかを判定。
+     * 現在時刻に該当する（または少し先の）スケジュール枠が未服薬かどうかを判定。
      * ポーリングの必要性を判定するために使用。
      *
      * @return true: 未服薬の枠あり（ポーリング必要）, false: 服薬済み or 該当枠なし（スキップ）
      */
     private suspend fun shouldPollIntake(): Boolean {
-        // getCurrentSlot() を再利用してスケジュール検索の重複を排除
-        val currentSlot = getCurrentSlot() ?: run {
+        // 1分先のスロットを確認（1分前からスキャンを開始するため）
+        val currentSlot = getCurrentSlot(lookAheadMinutes = 1) ?: run {
             val calendar = Calendar.getInstance()
             val currentMinutes = calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE)
-            logManager.d(TAG, "shouldPollIntake: no active slot at $currentMinutes -> skip")
+            logManager.d(TAG, "shouldPollIntake: no active or upcoming slot at $currentMinutes -> skip")
             return false
         }
 
@@ -477,7 +477,7 @@ class MedicineBleScanService : Service() {
         val scheduleType = com.pirorin215.medicinecasemob.ui.data.ScheduleType.fromId(currentSlot.id) ?: return false
         val isTaken = todayRecord?.isTaken(scheduleType) == true
 
-        logManager.d(TAG, "shouldPollIntake: slot=$scheduleType, taken=$isTaken -> ${if (!isTaken) "poll" else "skip"}")
+        logManager.d(TAG, "shouldPollIntake: slot=$scheduleType (lookahead), taken=$isTaken -> ${if (!isTaken) "poll" else "skip"}")
         return !isTaken
     }
 
@@ -489,19 +489,20 @@ class MedicineBleScanService : Service() {
             var lastSlot: com.pirorin215.medicinecasemob.ui.data.MedicineSchedule? = null
 
             while (isActive) {
-                val currentSlot = getCurrentSlot()
+                // 1分先のスロットを監視（1分前から接続準備を開始するため）
+                val currentSlot = getCurrentSlot(lookAheadMinutes = 1)
 
                 // 枠が変わった場合のみチェック
                 if (currentSlot != lastSlot) {
-                    logManager.d(TAG, "Time slot changed: ${lastSlot?.id} -> ${currentSlot?.id}")
+                    logManager.d(TAG, "Time slot changed (with 1min lookahead): ${lastSlot?.id} -> ${currentSlot?.id}")
 
                     // 新しい枠が有効で、かつ未服薬なら即時接続
                     if (currentSlot != null && currentSlot.enabled) {
                         val slotTaken = isSlotTaken(currentSlot)
-                        logManager.d(TAG, "New slot detected: id=${currentSlot.id}, enabled=true, taken=$slotTaken")
+                        logManager.d(TAG, "New upcoming slot detected: id=${currentSlot.id}, taken=$slotTaken")
 
                         if (!slotTaken) {
-                            logManager.d(TAG, "Untaken slot entered - initiating immediate connection")
+                            logManager.d(TAG, "Untaken upcoming slot detected - initiating look-ahead connection")
 
                             // 接続済みでなければスキャン開始
                             val currentState = bleManager.connectionState.value
@@ -509,33 +510,31 @@ class MedicineBleScanService : Service() {
                                 val settings = repository.settingsFlow.first()
                                 val lastAddress = settings.lastDeviceAddress
 
-                                logManager.d(TAG, "Starting immediate scan for untaken slot")
+                                logManager.d(TAG, "Starting immediate scan for upcoming untaken slot")
                                 bleManager.startScan(lastAddress)
                             } else {
                                 logManager.d(TAG, "Already connected, skipping immediate scan")
                             }
-                        } else {
-                            logManager.d(TAG, "Slot already taken - no immediate connection needed")
                         }
-                    } else if (currentSlot == null) {
-                        logManager.d(TAG, "No active slot (outside activity hours)")
                     }
 
                     lastSlot = currentSlot
                 }
 
-                // 1分ごとにチェック（負荷を軽減）
-                delay(60000)
+                // 30秒ごとにチェック（1分前を確実に捉えるため、監視間隔を短縮）
+                delay(30000)
             }
         }
     }
 
     /**
-     * 現在時刻に該当するスケジュール枠を取得
+     * 現在時刻（または指定分後）に該当するスケジュール枠を取得
+     * 
+     * @param lookAheadMinutes 先読みする時間（分）
      */
-    private suspend fun getCurrentSlot(): com.pirorin215.medicinecasemob.ui.data.MedicineSchedule? {
+    private suspend fun getCurrentSlot(lookAheadMinutes: Int = 0): com.pirorin215.medicinecasemob.ui.data.MedicineSchedule? {
         val calendar = Calendar.getInstance()
-        val currentMinutes = calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE)
+        val currentMinutes = calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE) + lookAheadMinutes
 
         val settings = repository.settingsFlow.first()
         val schedules = repository.getSchedulesFromSettings(settings)

@@ -27,7 +27,8 @@ data class IntakeEventHistoryItem(
     val mcuTimestamp: Long,         // マイコン側のタイムスタンプ (Unix timestamp in seconds)
     val rawEvent: String,           // 生データ "INTAKE:<timestamp>" or "NONE"
     val scheduleType: ScheduleType?, // nullなら範囲外
-    val wasRecorded: Boolean         // 記録されたかどうか
+    val wasRecorded: Boolean,        // 記録されたかどうか
+    val suppressedCount: Int = 0     // 連続重複で省略された件数
 )
 
 enum class HistoryFilter {
@@ -82,14 +83,27 @@ class DebugViewModel @Inject constructor(
     private val _historyFilter = MutableStateFlow(HistoryFilter.ALL)
     val historyFilter: StateFlow<HistoryFilter> = _historyFilter.asStateFlow()
 
+    // Dedup toggle
+    private val _dedupEnabled = MutableStateFlow(true)
+    val dedupEnabled: StateFlow<Boolean> = _dedupEnabled.asStateFlow()
+
+    fun toggleDedup() {
+        _dedupEnabled.value = !_dedupEnabled.value
+    }
+
     // Filtered history (for UI)
-    val filteredHistory: StateFlow<List<IntakeEventHistoryItem>> = _intakeHistory.combine(_historyFilter) { history, filter ->
-        when (filter) {
+    val filteredHistory: StateFlow<List<IntakeEventHistoryItem>> = combine(
+        _intakeHistory,
+        _historyFilter,
+        _dedupEnabled
+    ) { history, filter, dedup ->
+        val filtered = when (filter) {
             HistoryFilter.ALL -> history
             HistoryFilter.TIME -> history.filter { isTimeRelated(it.rawEvent) }
             HistoryFilter.DETECTION -> history.filter { isDetectionRelated(it.rawEvent) }
             HistoryFilter.INTAKE -> history.filter { isIntakeRelated(it.rawEvent) }
         }
+        if (dedup) deduplicateHistory(filtered) else filtered
     }.stateIn(
         scope = viewModelScope,
         started = kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000),
@@ -260,6 +274,31 @@ class DebugViewModel @Inject constructor(
 
     fun setHistoryFilter(filter: HistoryFilter) {
         _historyFilter.value = filter
+    }
+
+    /**
+     * 連続する同じ rawEvent を省略し、最初の1件だけ残す。
+     * 省略された件数は suppressedCount に保持する。
+     */
+    private fun deduplicateHistory(items: List<IntakeEventHistoryItem>): List<IntakeEventHistoryItem> {
+        if (items.isEmpty()) return emptyList()
+
+        val result = mutableListOf<IntakeEventHistoryItem>()
+        var current = items[0]
+        var count = 0
+
+        for (i in 1 until items.size) {
+            if (items[i].rawEvent == current.rawEvent) {
+                count++
+            } else {
+                result.add(current.copy(suppressedCount = count))
+                current = items[i]
+                count = 0
+            }
+        }
+        result.add(current.copy(suppressedCount = count))
+
+        return result
     }
 
     private fun isTimeRelated(rawEvent: String): Boolean {

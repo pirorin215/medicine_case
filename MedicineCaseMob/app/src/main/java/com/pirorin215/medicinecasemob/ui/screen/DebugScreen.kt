@@ -62,6 +62,7 @@ fun DebugScreen(
     val selectedCommand by viewModel.selectedPredefinedCommand.collectAsState()
     val manualCommandInput by viewModel.manualCommandInput.collectAsState()
     val historyFilter by viewModel.historyFilter.collectAsState()
+    val dedupEnabled by viewModel.dedupEnabled.collectAsState()
 
     Scaffold(
         topBar = {
@@ -236,7 +237,8 @@ fun DebugScreen(
                     // Filter buttons
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         HistoryFilterButton(
                             text = "ALL",
@@ -257,6 +259,12 @@ fun DebugScreen(
                             text = "intake",
                             selected = historyFilter == com.pirorin215.medicinecasemob.ui.viewModel.HistoryFilter.INTAKE,
                             onClick = { viewModel.setHistoryFilter(com.pirorin215.medicinecasemob.ui.viewModel.HistoryFilter.INTAKE) }
+                        )
+                        Spacer(modifier = Modifier.weight(1f))
+                        HistoryFilterButton(
+                            text = if (dedupEnabled) "重複省略 ✓" else "重複省略",
+                            selected = dedupEnabled,
+                            onClick = { viewModel.toggleDedup() }
                         )
                     }
                     Spacer(modifier = Modifier.height(8.dp))
@@ -396,6 +404,15 @@ private fun IntakeHistoryItem(
                     else -> MaterialTheme.colorScheme.onSurfaceVariant
                 }
             )
+
+            // Suppressed count
+            if (event.suppressedCount > 0) {
+                Text(
+                    text = "（${event.suppressedCount}件省略）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
 
             // Additional info for INTAKE events
             if (event.rawEvent.startsWith("INTAKE:")) {
