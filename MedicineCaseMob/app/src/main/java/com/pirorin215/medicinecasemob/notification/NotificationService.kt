@@ -207,8 +207,6 @@ class NotificationService @Inject constructor(
     }
 
     private fun sendNotification(scheduleType: ScheduleType, isInSlot: Boolean) {
-        val notificationId = scheduleType.id * 1000 + Calendar.getInstance().get(Calendar.DAY_OF_YEAR)
-
         val title = if (isInSlot) "服薬の時間です" else "${scheduleType.displayName}の服薬がまだです"
         val text = if (isInSlot) "${scheduleType.displayName}の薬を飲む時間になりました。" else "お薬を忘れずに服用してください。"
 
@@ -221,6 +219,27 @@ class NotificationService @Inject constructor(
             .build()
 
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.notify(notificationId, notification)
+        notificationManager.notify(notificationIdFor(scheduleType), notification)
     }
+
+    /**
+     * 服薬が検知・DBに記録されたことをユーザに知らせる確認通知。
+     * 服薬忘れ通知と同じIDを使い、忘れ通知を上書き（キャンセル相当）する。
+     * これにより「服薬済みなのに忘れ通知が残る」矛盾を防ぐ。
+     */
+    fun notifyIntakeConfirmed(scheduleType: ScheduleType) {
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle("服薬を確認しました")
+            .setContentText("${scheduleType.displayName}の服薬を確認しました。")
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setAutoCancel(true)
+            .build()
+
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.notify(notificationIdFor(scheduleType), notification)
+    }
+
+    private fun notificationIdFor(scheduleType: ScheduleType): Int =
+        scheduleType.id * 1000 + Calendar.getInstance().get(Calendar.DAY_OF_YEAR)
 }

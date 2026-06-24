@@ -162,107 +162,17 @@ class MedicineBleScanService : Service() {
                     val timestamp = timestampStr.toLongOrNull() ?: 0L
 
                     // Record intake (DB-level duplicate check is done inside)
-                    recordIntakeLocally(timestamp)
+                    repository.recordIntakeEvent(timestamp)?.let { confirmed ->
+                        // 対象スロットに新規で服薬チェックが付いたら確認通知を送る
+                        notificationService.notifyIntakeConfirmed(confirmed)
+                        logManager.d(TAG, "Intake confirmed notification sent for $confirmed")
+                    }
                 }
 
                 // Consume and clear debug timestamps
                 bleManager.consumeIntakeEvent()
                 bleManager.clearLastIntakeTimestamp()
             }
-        }
-    }
-
-    private suspend fun recordIntakeLocally(mcuTimestamp: Long) {
-        // DB-level duplicate check: if this mcu_timestamp is already recorded, skip
-        if (repository.isMcuTimestampRecorded(mcuTimestamp)) {
-            logManager.d(TAG, "Duplicate intake event ignored (already in DB): $mcuTimestamp")
-            return
-        }
-
-        val phoneTimestamp = System.currentTimeMillis() / 1000
-
-        // Use MCU timestamp if available, otherwise use phone timestamp
-        val effectiveTimestamp = if (mcuTimestamp > 0) mcuTimestamp else phoneTimestamp
-
-        // Determine period using simple time-based logic (new design)
-        val settings = repository.settingsFlow.first()
-        val schedules = repository.getSchedulesFromSettings(settings)
-        val scheduleType = determineScheduleTypeSimple(effectiveTimestamp, schedules)
-
-        if (scheduleType == null) {
-            logManager.d(TAG, "Ignoring intake: no valid schedule for current time (outside activity hours)")
-            return
-        }
-
-        // Ensure today's record exists and get it (single DB query)
-        val todayRecord = repository.ensureTodayRecordExists()
-
-        // Check already taken using FRESH data from DB
-        if (todayRecord.isTaken(scheduleType)) {
-            logManager.d(TAG, "Ignoring intake: already recorded for $scheduleType")
-            return
-        }
-
-        // Record using FRESH data from DB
-        val updatedRecord = todayRecord.withTaken(scheduleType, mcuTimestamp, phoneTimestamp)
-
-        repository.insertIntakeRecord(updatedRecord)
-        logManager.d(TAG, "Intake recorded: $scheduleType mcu_time=$mcuTimestamp, phone_received=$phoneTimestamp")
-    }
-
-    /**
-     * 時刻ベースのシンプルな枠判定（新しい設計）
-     *
-     * 既存の設定データから境界時刻を計算し、時刻だけで枠を判定
-     * - 朝: 7:00 - 11:00 (朝の終了時刻まで)
-     * - 昼: 11:00 - 17:00 (昼の終了時刻まで)
-     * - 夜: 17:00 - 23:00 (夜の終了時刻まで)
-     *
-     * 重要：昨日以前の服薬検知は無視する（日付が異なる場合はnullを返す）
-     *
-     * @param timestamp 判定するタイムスタンプ（Unix秒）
-     * @param schedules スケジュール設定（既存データからの互換性維持）
-     * @return 枠タイプ。該当しない場合はnull
-     */
-    private fun determineScheduleTypeSimple(
-        timestamp: Long,
-        schedules: List<com.pirorin215.medicinecasemob.ui.data.MedicineSchedule>
-    ): com.pirorin215.medicinecasemob.ui.data.ScheduleType? {
-        val currentCalendar = Calendar.getInstance()
-        val currentDay = currentCalendar.get(Calendar.DAY_OF_YEAR)
-        val currentYear = currentCalendar.get(Calendar.YEAR)
-
-        val intakeCalendar = Calendar.getInstance()
-        intakeCalendar.timeInMillis = timestamp * 1000
-        val intakeDay = intakeCalendar.get(Calendar.DAY_OF_YEAR)
-        val intakeYear = intakeCalendar.get(Calendar.YEAR)
-
-        // 日付が異なる場合は無効（昨日以前の服薬は無視）
-        if (intakeYear != currentYear || intakeDay != currentDay) {
-            logManager.d(TAG, "Ignoring intake: different date (intake: $intakeYear/$intakeDay, current: $currentYear/$currentDay)")
-            return null
-        }
-
-        // 同一日の場合のみ、時刻で枠判定
-        val hour = intakeCalendar.get(Calendar.HOUR_OF_DAY)
-
-        // 設定データから境界時刻を計算
-        val morningSchedule = schedules.find { it.id == 0 }
-        val afternoonSchedule = schedules.find { it.id == 1 }
-        val eveningSchedule = schedules.find { it.id == 2 }
-
-        val morningEndHour = morningSchedule?.endHour ?: 11
-        val afternoonEndHour = afternoonSchedule?.endHour ?: 17
-        val eveningEndHour = eveningSchedule?.endHour ?: 23
-        val activityStartHour = morningSchedule?.startHour ?: 7
-
-        // 設定値ベースの時刻判定
-        return when {
-            hour < activityStartHour -> null  // 活動前
-            hour < morningEndHour -> com.pirorin215.medicinecasemob.ui.data.ScheduleType.MORNING
-            hour < afternoonEndHour -> com.pirorin215.medicinecasemob.ui.data.ScheduleType.AFTERNOON
-            hour < eveningEndHour -> com.pirorin215.medicinecasemob.ui.data.ScheduleType.EVENING
-            else -> null  // 活動後
         }
     }
 
@@ -435,9 +345,18 @@ class MedicineBleScanService : Service() {
             }
 
             val isConnected = bleManager.connectionState.value is BleManager.ConnectionState.Connected
+            // BLE接続中なら、通知判定前に最新の服薬状態を取得してDBを最新化
+            // これにより「既に服薬済みなのに通知が送られる」問題を防ぐ
+            if (isConnected && bleManager.serviceReady.value) {
+                val intakeResult = bleManager.queryIntake(timeoutMs = 2000L)
+                if (intakeResult != null) {
+                    logManager.d(TAG, "Pre-notification intake query: $intakeResult")
+                    // ObserverがDB更新するのを待つ
+                    delay(500)
+                }
+            }
 
-            // DBから最新の服薬記録を取得
-            // （ポーリング or サービス接続時の queryIntake で既にDBは最新化されている）
+            // DBから最新の服薬記録を取得（上記 queryIntake / ポーリング / サービス接続で最新化済み）
             val todayRecord = repository.ensureTodayRecordExists()
 
             // Load settings from repository

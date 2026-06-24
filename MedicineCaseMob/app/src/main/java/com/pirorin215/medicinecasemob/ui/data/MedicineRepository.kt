@@ -1,5 +1,6 @@
 package com.pirorin215.medicinecasemob.ui.data
 
+import com.pirorin215.medicinecasemob.util.LogManager
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
@@ -9,6 +10,12 @@ class MedicineRepository(
     private val medicineDao: MedicineDao,
     private val preferenceManager: PreferenceManager
 ) {
+
+    companion object {
+        private const val TAG = "MedicineRepository"
+    }
+
+    private val logManager = LogManager.getInstance()
 
     // Settings (DataStore)
     val settingsFlow: Flow<AppSettingsData> = preferenceManager.settingsFlow
@@ -133,6 +140,88 @@ class MedicineRepository(
     suspend fun isMcuTimestampRecorded(mcuTimestamp: Long): Boolean {
         if (mcuTimestamp == 0L) return false
         return medicineDao.findRecordByMcuTime(mcuTimestamp) != null
+    }
+
+    /**
+     * BLEから受信した服薬イベント(mcuTimestamp)をDBに記録する。
+     * マイコン時刻による重複排除・活動時間外の除外・既服薬のスキップを行う。
+     * MedicineBleScanService（push/poll）と NotificationScheduler（安全網）の
+     * 両方から呼ばれる、服薬記録の単一経路。
+     *
+     * @return 新規に服薬記録を書き込んだ場合はその ScheduleType、それ以外は null
+     */
+    suspend fun recordIntakeEvent(mcuTimestamp: Long): ScheduleType? {
+        // DBレベルの重複排除: 同じマイコン時刻が既に記録済みなら無視
+        if (isMcuTimestampRecorded(mcuTimestamp)) {
+            logManager.d(TAG, "Duplicate intake event ignored (already in DB): $mcuTimestamp")
+            return null
+        }
+
+        val phoneTimestamp = System.currentTimeMillis() / 1000
+        val effectiveTimestamp = if (mcuTimestamp > 0) mcuTimestamp else phoneTimestamp
+
+        val settings = preferenceManager.settingsFlow.first()
+        val schedules = getSchedulesFromSettings(settings)
+        val scheduleType = determineScheduleTypeForTimestamp(effectiveTimestamp, schedules)
+
+        if (scheduleType == null) {
+            logManager.d(TAG, "Ignoring intake: no valid schedule for current time (outside activity hours)")
+            return null
+        }
+
+        val todayRecord = ensureTodayRecordExists()
+
+        if (todayRecord.isTaken(scheduleType)) {
+            logManager.d(TAG, "Ignoring intake: already recorded for $scheduleType")
+            return null
+        }
+
+        val updatedRecord = todayRecord.withTaken(scheduleType, mcuTimestamp, phoneTimestamp)
+        insertIntakeRecord(updatedRecord)
+        logManager.d(TAG, "Intake recorded: $scheduleType mcu_time=$mcuTimestamp, phone_received=$phoneTimestamp")
+        return scheduleType
+    }
+
+    /**
+     * 時刻ベースのシンプルな枠判定。
+     * 昨日以前の服薬検知は無視し、活動時間内の時刻から枠(朝/昼/夜)を決定する。
+     */
+    private fun determineScheduleTypeForTimestamp(
+        timestamp: Long,
+        schedules: List<MedicineSchedule>
+    ): ScheduleType? {
+        val currentCalendar = Calendar.getInstance()
+        val currentDay = currentCalendar.get(Calendar.DAY_OF_YEAR)
+        val currentYear = currentCalendar.get(Calendar.YEAR)
+
+        val intakeCalendar = Calendar.getInstance()
+        intakeCalendar.timeInMillis = timestamp * 1000
+        val intakeDay = intakeCalendar.get(Calendar.DAY_OF_YEAR)
+        val intakeYear = intakeCalendar.get(Calendar.YEAR)
+
+        if (intakeYear != currentYear || intakeDay != currentDay) {
+            logManager.d(TAG, "Ignoring intake: different date (intake: $intakeYear/$intakeDay, current: $currentYear/$currentDay)")
+            return null
+        }
+
+        val hour = intakeCalendar.get(Calendar.HOUR_OF_DAY)
+
+        val morningSchedule = schedules.find { it.id == ScheduleType.MORNING.id }
+        val afternoonSchedule = schedules.find { it.id == ScheduleType.AFTERNOON.id }
+        val eveningSchedule = schedules.find { it.id == ScheduleType.EVENING.id }
+
+        val morningEndHour = morningSchedule?.endHour ?: 11
+        val afternoonEndHour = afternoonSchedule?.endHour ?: 17
+        val eveningEndHour = eveningSchedule?.endHour ?: 23
+        val activityStartHour = morningSchedule?.startHour ?: 7
+
+        return when {
+            hour < activityStartHour -> null  // 活動前
+            hour < morningEndHour -> ScheduleType.MORNING
+            hour < afternoonEndHour -> ScheduleType.AFTERNOON
+            hour < eveningEndHour -> ScheduleType.EVENING
+            else -> null  // 活動後
+        }
     }
 
     suspend fun clearIntakeRecordsByIds(ids: List<Long>) {
