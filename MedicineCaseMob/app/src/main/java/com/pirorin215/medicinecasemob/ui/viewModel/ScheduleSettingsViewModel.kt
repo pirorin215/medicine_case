@@ -51,6 +51,15 @@ class ScheduleSettingsViewModel @Inject constructor(
         repository.getSchedulesFromSettings(settings)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    // 通知推奨時刻（枠とは独立した3つ）の日中分リスト
+    val preferredReminderMinutes: StateFlow<List<Int>> = settings.map { settings ->
+        listOf(
+            settings.preferredReminderMinute1,
+            settings.preferredReminderMinute2,
+            settings.preferredReminderMinute3
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     init {
         viewModelScope.launch {
             settings.collect { settings ->
@@ -121,22 +130,25 @@ class ScheduleSettingsViewModel @Inject constructor(
         }
     }
 
-    fun updateScheduleReminderTime(type: ScheduleType, hour: Int, minute: Int) {
+    /**
+     * 通知推奨時刻を更新する（index: 1〜3、枠とは独立）。
+     */
+    fun updatePreferredReminderTime(index: Int, hour: Int, minute: Int) {
         viewModelScope.launch {
             val current = repository.settingsFlow.first()
-            val reminderMinute = hour * 60 + minute
-            val updated = when (type) {
-                ScheduleType.MORNING -> current.copy(
-                    morningReminderMinute = reminderMinute,
-                    morningNotifiedInSlot = false
+            val preferredMinute = hour * 60 + minute
+            val updated = when (index) {
+                1 -> current.copy(
+                    preferredReminderMinute1 = preferredMinute,
+                    preferredNotified1 = false
                 )
-                ScheduleType.AFTERNOON -> current.copy(
-                    afternoonReminderMinute = reminderMinute,
-                    afternoonNotifiedInSlot = false
+                2 -> current.copy(
+                    preferredReminderMinute2 = preferredMinute,
+                    preferredNotified2 = false
                 )
-                ScheduleType.EVENING -> current.copy(
-                    eveningReminderMinute = reminderMinute,
-                    eveningNotifiedInSlot = false
+                else -> current.copy(
+                    preferredReminderMinute3 = preferredMinute,
+                    preferredNotified3 = false
                 )
             }
             saveAndLogSettings(updated)
@@ -178,9 +190,13 @@ class ScheduleSettingsViewModel @Inject constructor(
             // 設定内容をダンプ
             logManager.addInfoLog("=== 設定変更・保存 ===")
             logManager.addInfoLog("■スケジュール")
-            logManager.addInfoLog("  朝: ${if (updated.morningEnabled) "有効" else "無効"} ${formatTimeRange(updated.morningStartMinute, updated.afternoonStartMinute)} (推奨: ${updated.morningReminderMinute.formatTimeOfDay()})")
-            logManager.addInfoLog("  昼: ${if (updated.afternoonEnabled) "有効" else "無効"} ${formatTimeRange(updated.afternoonStartMinute, updated.eveningStartMinute)} (推奨: ${updated.afternoonReminderMinute.formatTimeOfDay()})")
-            logManager.addInfoLog("  夜: ${if (updated.eveningEnabled) "有効" else "無効"} ${formatTimeRange(updated.eveningStartMinute, updated.dayEndMinute)} (推奨: ${updated.eveningReminderMinute.formatTimeOfDay()})")
+            logManager.addInfoLog("  朝: ${if (updated.morningEnabled) "有効" else "無効"} ${formatTimeRange(updated.morningStartMinute, updated.afternoonStartMinute)}")
+            logManager.addInfoLog("  昼: ${if (updated.afternoonEnabled) "有効" else "無効"} ${formatTimeRange(updated.afternoonStartMinute, updated.eveningStartMinute)}")
+            logManager.addInfoLog("  夜: ${if (updated.eveningEnabled) "有効" else "無効"} ${formatTimeRange(updated.eveningStartMinute, updated.dayEndMinute)}")
+            logManager.addInfoLog("■通知推奨時刻（有効枠外は無視）")
+            logManager.addInfoLog("  1: ${updated.preferredReminderMinute1.formatTimeOfDay()}")
+            logManager.addInfoLog("  2: ${updated.preferredReminderMinute2.formatTimeOfDay()}")
+            logManager.addInfoLog("  3: ${updated.preferredReminderMinute3.formatTimeOfDay()}")
             logManager.addInfoLog("■通知")
             logManager.addInfoLog("  BLE接続時のみ通知: ${if (updated.onlyNotifyWhenBleConnected) "ON" else "OFF"}")
             logManager.addInfoLog("  リマインダー間隔: ${updated.notificationIntervalMinutes}分")

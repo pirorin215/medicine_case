@@ -40,6 +40,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.pirorin215.medicinecasemob.ui.data.AppSettingsData
 import com.pirorin215.medicinecasemob.ui.data.ScheduleType
 import com.pirorin215.medicinecasemob.ui.viewModel.ScheduleSettingsViewModel
 import androidx.compose.material.icons.Icons
@@ -53,6 +54,7 @@ fun ScheduleSettingsScreen(
     viewModel: ScheduleSettingsViewModel = hiltViewModel()
 ) {
     val schedules by viewModel.schedules.collectAsState(initial = emptyList())
+    val preferredReminderMinutes by viewModel.preferredReminderMinutes.collectAsState(initial = emptyList())
     val onlyNotifyWhenBleConnected by viewModel.onlyNotifyWhenBleConnected.collectAsState(initial = false)
     val notificationIntervalMinutes by viewModel.notificationIntervalMinutes.collectAsState(initial = 60)
     val uiFontSizeScale by viewModel.uiFontSizeScale.collectAsState()
@@ -124,8 +126,6 @@ fun ScheduleSettingsScreen(
                             startMinute = startMinute,
                             endHour = endHour,
                             endMinute = endMinute,
-                            reminderHour = schedule?.reminderHour ?: type.defaultStartHour + 1, // Default to 1 hour after start
-                            reminderMinute = schedule?.reminderMinute ?: type.defaultStartMinute,
                             onEnabledChange = { viewModel.updateScheduleEnabled(type, it) },
                             onTimeClick = {
                                 timeRangeDialogSchedule = type
@@ -136,14 +136,71 @@ fun ScheduleSettingsScreen(
                                     endMinute = endMinute
                                 )
                                 showTimeRangeDialog = true
-                            },
-                            onReminderTimeChange = { h, m ->
-                                viewModel.updateScheduleReminderTime(type, h, m)
                             }
                         )
 
                         if (type != ScheduleType.EVENING) {
                             Spacer(modifier = Modifier.height(8.dp))
+                        }
+                    }
+                }
+            }
+
+            // --- Preferred Reminder Times (枠とは独立した3つの時刻) ---
+            Card(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                ) {
+                    Text(
+                        text = "通知推奨時刻",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Text(
+                        text = "設定した時刻に服薬されていない場合に通知します（有効な枠の時間帯外に設定した時刻は無視されます）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    listOf(1, 2, 3).forEach { index ->
+                        val defaultMinute = AppSettingsData.DEFAULT_PREFERRED_REMINDER_MINUTES[index - 1]
+                        val minuteOfDay = preferredReminderMinutes.getOrNull(index - 1) ?: defaultMinute
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "推奨時刻$index",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium
+                            )
+                            TextButton(
+                                onClick = {
+                                    TimePickerDialog(
+                                        context,
+                                        { _, h, m -> viewModel.updatePreferredReminderTime(index, h, m) },
+                                        minuteOfDay / 60,
+                                        minuteOfDay % 60,
+                                        true
+                                    ).show()
+                                }
+                            ) {
+                                Text(
+                                    text = "%02d:%02d".format(minuteOfDay / 60, minuteOfDay % 60),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
                         }
                     }
                 }
@@ -327,13 +384,9 @@ private fun ScheduleRow(
     startMinute: Int,
     endHour: Int,
     endMinute: Int,
-    reminderHour: Int,
-    reminderMinute: Int,
     onEnabledChange: (Boolean) -> Unit,
-    onTimeClick: () -> Unit,
-    onReminderTimeChange: (Int, Int) -> Unit
+    onTimeClick: () -> Unit
 ) {
-    val context = LocalContext.current
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -370,38 +423,6 @@ private fun ScheduleRow(
                         MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                     }
                 )
-            }
-        }
-        
-        if (enabled) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 48.dp), // Align with the text after switch
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.End
-            ) {
-                Text(
-                    text = "通知推奨時刻:",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                TextButton(
-                    onClick = {
-                        TimePickerDialog(
-                            context,
-                            { _, h, m -> onReminderTimeChange(h, m) },
-                            reminderHour,
-                            reminderMinute,
-                            true
-                        ).show()
-                    }
-                ) {
-                    Text(
-                        text = "%02d:%02d".format(reminderHour, reminderMinute),
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                }
             }
         }
     }

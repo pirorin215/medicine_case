@@ -62,8 +62,11 @@ class MedicineRepository(
     suspend fun updateEndNotificationFlags(morning: Boolean, afternoon: Boolean, evening: Boolean) =
         preferenceManager.updateEndNotificationFlags(morning, afternoon, evening)
 
-    suspend fun updateInSlotNotificationFlags(morning: Boolean, afternoon: Boolean, evening: Boolean) =
-        preferenceManager.updateInSlotNotificationFlags(morning, afternoon, evening)
+    suspend fun updateChanceNotificationFlags(morning: Boolean, afternoon: Boolean, evening: Boolean) =
+        preferenceManager.updateChanceNotificationFlags(morning, afternoon, evening)
+
+    suspend fun updatePreferredNotificationFlags(preferred1: Boolean, preferred2: Boolean, preferred3: Boolean) =
+        preferenceManager.updatePreferredNotificationFlags(preferred1, preferred2, preferred3)
 
     suspend fun updateLastNotificationTimestamp(timestamp: Long) =
         preferenceManager.updateLastNotificationTimestamp(timestamp)
@@ -82,9 +85,7 @@ class MedicineRepository(
                 startHour = settings.morningStartMinute / 60,
                 startMinute = settings.morningStartMinute % 60,
                 endHour = settings.afternoonStartMinute / 60,
-                endMinute = settings.afternoonStartMinute % 60,
-                reminderHour = settings.morningReminderMinute / 60,
-                reminderMinute = settings.morningReminderMinute % 60
+                endMinute = settings.afternoonStartMinute % 60
             ),
             MedicineSchedule(
                 id = ScheduleType.AFTERNOON.id,
@@ -92,9 +93,7 @@ class MedicineRepository(
                 startHour = settings.afternoonStartMinute / 60,
                 startMinute = settings.afternoonStartMinute % 60,
                 endHour = settings.eveningStartMinute / 60,
-                endMinute = settings.eveningStartMinute % 60,
-                reminderHour = settings.afternoonReminderMinute / 60,
-                reminderMinute = settings.afternoonReminderMinute % 60
+                endMinute = settings.eveningStartMinute % 60
             ),
             MedicineSchedule(
                 id = ScheduleType.EVENING.id,
@@ -102,9 +101,7 @@ class MedicineRepository(
                 startHour = settings.eveningStartMinute / 60,
                 startMinute = settings.eveningStartMinute % 60,
                 endHour = settings.dayEndMinute / 60,
-                endMinute = settings.dayEndMinute % 60,
-                reminderHour = settings.eveningReminderMinute / 60,
-                reminderMinute = settings.eveningReminderMinute % 60
+                endMinute = settings.dayEndMinute % 60
             )
         )
     }
@@ -236,6 +233,7 @@ class MedicineRepository(
      */
     suspend fun resetDailyNotificationFlags() {
         updateEndNotificationFlags(morning = false, afternoon = false, evening = false)
-        updateInSlotNotificationFlags(morning = false, afternoon = false, evening = false)
+        updateChanceNotificationFlags(morning = false, afternoon = false, evening = false)
+        updatePreferredNotificationFlags(preferred1 = false, preferred2 = false, preferred3 = false)
     }
 }

@@ -23,10 +23,15 @@ class PreferenceManager @Inject constructor(private val context: Context) {
         val EVENING_START_MINUTE = intPreferencesKey("evening_start_minute_v2")
         val DAY_END_MINUTE = intPreferencesKey("day_end_minute_v2")
 
-        // Reminder Times (minute-based)
+        // Reminder Times (minute-based) - 旧キー（枠ごとの推奨時刻）。移行フォールバック用
         val MORNING_REMINDER_MINUTE = intPreferencesKey("morning_reminder_minute_v2")
         val AFTERNOON_REMINDER_MINUTE = intPreferencesKey("afternoon_reminder_minute_v2")
         val EVENING_REMINDER_MINUTE = intPreferencesKey("evening_reminder_minute_v2")
+
+        // Preferred Reminder Times (minute-based) - 枠とは独立した推奨時刻
+        val PREFERRED_REMINDER_MINUTE_1 = intPreferencesKey("preferred_reminder_minute_1")
+        val PREFERRED_REMINDER_MINUTE_2 = intPreferencesKey("preferred_reminder_minute_2")
+        val PREFERRED_REMINDER_MINUTE_3 = intPreferencesKey("preferred_reminder_minute_3")
 
         // Schedule Enabled Flags
         val MORNING_ENABLED = booleanPreferencesKey("morning_enabled")
@@ -63,10 +68,15 @@ class PreferenceManager @Inject constructor(private val context: Context) {
         val NOTIFIED_AT_END_OF_AFTERNOON = booleanPreferencesKey("notified_at_end_of_afternoon")
         val NOTIFIED_AT_END_OF_EVENING = booleanPreferencesKey("notified_at_end_of_evening")
 
-        // Notification Flags (In-slot)
+        // Notification Flags (In-slot chance notification by BLE connect)
         val NOTIFIED_IN_SLOT_MORNING = booleanPreferencesKey("notified_in_slot_morning")
         val NOTIFIED_IN_SLOT_AFTERNOON = booleanPreferencesKey("notified_in_slot_afternoon")
         val NOTIFIED_IN_SLOT_EVENING = booleanPreferencesKey("notified_in_slot_evening")
+
+        // Notification Flags (Preferred time reached)
+        val PREFERRED_NOTIFIED_1 = booleanPreferencesKey("preferred_notified_1")
+        val PREFERRED_NOTIFIED_2 = booleanPreferencesKey("preferred_notified_2")
+        val PREFERRED_NOTIFIED_3 = booleanPreferencesKey("preferred_notified_3")
 
         // Detection Settings
         val MOVEMENT_THRESHOLD = floatPreferencesKey("movement_threshold")
@@ -124,7 +134,7 @@ class PreferenceManager @Inject constructor(private val context: Context) {
                 )
             }
 
-            // Determine reminder times
+            // Determine reminder times (旧キー。新キー未設定時の移行フォールバックに使用)
             val morningReminder = if (needsMigration) {
                 preferences[PreferencesKeys.MORNING_REMINDER_MINUTE]
                     ?: (preferences[PreferencesKeys.LEGACY_MORNING_REMINDER_HOUR] ?: 9) * 60 +
@@ -147,21 +157,31 @@ class PreferenceManager @Inject constructor(private val context: Context) {
                 preferences[PreferencesKeys.EVENING_REMINDER_MINUTE] ?: 20 * 60
             }
 
+            // Determine preferred reminder times（新キー優先、旧枠ごとの値を引き継ぐ）
+            val preferredReminder1 = preferences[PreferencesKeys.PREFERRED_REMINDER_MINUTE_1] ?: morningReminder
+            val preferredReminder2 = preferences[PreferencesKeys.PREFERRED_REMINDER_MINUTE_2] ?: afternoonReminder
+            val preferredReminder3 = preferences[PreferencesKeys.PREFERRED_REMINDER_MINUTE_3] ?: eveningReminder
+
             // Build common fields once
             AppSettingsData(
                 morningEnabled = preferences[PreferencesKeys.MORNING_ENABLED] ?: true,
-                morningReminderMinute = morningReminder,
                 morningStartMinute = slotBoundaries.morningStart,
 
                 afternoonEnabled = preferences[PreferencesKeys.AFTERNOON_ENABLED] ?: true,
-                afternoonReminderMinute = afternoonReminder,
                 afternoonStartMinute = slotBoundaries.afternoonStart,
 
                 eveningEnabled = preferences[PreferencesKeys.EVENING_ENABLED] ?: true,
-                eveningReminderMinute = eveningReminder,
                 eveningStartMinute = slotBoundaries.eveningStart,
 
                 dayEndMinute = slotBoundaries.dayEnd,
+
+                preferredReminderMinute1 = preferredReminder1,
+                preferredReminderMinute2 = preferredReminder2,
+                preferredReminderMinute3 = preferredReminder3,
+
+                preferredNotified1 = preferences[PreferencesKeys.PREFERRED_NOTIFIED_1] ?: false,
+                preferredNotified2 = preferences[PreferencesKeys.PREFERRED_NOTIFIED_2] ?: false,
+                preferredNotified3 = preferences[PreferencesKeys.PREFERRED_NOTIFIED_3] ?: false,
 
                 onlyNotifyWhenBleConnected = preferences[PreferencesKeys.ONLY_NOTIFY_WHEN_BLE_CONNECTED] ?: false,
                 notificationIntervalMinutes = preferences[PreferencesKeys.NOTIFICATION_INTERVAL_MINUTES] ?: 60,
@@ -176,9 +196,9 @@ class PreferenceManager @Inject constructor(private val context: Context) {
                 notifiedAtEndOfAfternoon = preferences[PreferencesKeys.NOTIFIED_AT_END_OF_AFTERNOON] ?: false,
                 notifiedAtEndOfEvening = preferences[PreferencesKeys.NOTIFIED_AT_END_OF_EVENING] ?: false,
 
-                morningNotifiedInSlot = preferences[PreferencesKeys.NOTIFIED_IN_SLOT_MORNING] ?: false,
-                afternoonNotifiedInSlot = preferences[PreferencesKeys.NOTIFIED_IN_SLOT_AFTERNOON] ?: false,
-                eveningNotifiedInSlot = preferences[PreferencesKeys.NOTIFIED_IN_SLOT_EVENING] ?: false,
+                chanceNotifiedMorning = preferences[PreferencesKeys.NOTIFIED_IN_SLOT_MORNING] ?: false,
+                chanceNotifiedAfternoon = preferences[PreferencesKeys.NOTIFIED_IN_SLOT_AFTERNOON] ?: false,
+                chanceNotifiedEvening = preferences[PreferencesKeys.NOTIFIED_IN_SLOT_EVENING] ?: false,
 
                 lastDeviceAddress = preferences[PreferencesKeys.LAST_DEVICE_ADDRESS]
             )
@@ -197,17 +217,23 @@ class PreferenceManager @Inject constructor(private val context: Context) {
             // Save new minute-based values
             preferences[PreferencesKeys.MORNING_ENABLED] = settings.morningEnabled
             preferences[PreferencesKeys.MORNING_START_MINUTE] = settings.morningStartMinute
-            preferences[PreferencesKeys.MORNING_REMINDER_MINUTE] = settings.morningReminderMinute
 
             preferences[PreferencesKeys.AFTERNOON_ENABLED] = settings.afternoonEnabled
             preferences[PreferencesKeys.AFTERNOON_START_MINUTE] = settings.afternoonStartMinute
-            preferences[PreferencesKeys.AFTERNOON_REMINDER_MINUTE] = settings.afternoonReminderMinute
 
             preferences[PreferencesKeys.EVENING_ENABLED] = settings.eveningEnabled
             preferences[PreferencesKeys.EVENING_START_MINUTE] = settings.eveningStartMinute
-            preferences[PreferencesKeys.EVENING_REMINDER_MINUTE] = settings.eveningReminderMinute
 
             preferences[PreferencesKeys.DAY_END_MINUTE] = settings.dayEndMinute
+
+            // Preferred reminder times (枠とは独立した推奨時刻)
+            preferences[PreferencesKeys.PREFERRED_REMINDER_MINUTE_1] = settings.preferredReminderMinute1
+            preferences[PreferencesKeys.PREFERRED_REMINDER_MINUTE_2] = settings.preferredReminderMinute2
+            preferences[PreferencesKeys.PREFERRED_REMINDER_MINUTE_3] = settings.preferredReminderMinute3
+
+            preferences[PreferencesKeys.PREFERRED_NOTIFIED_1] = settings.preferredNotified1
+            preferences[PreferencesKeys.PREFERRED_NOTIFIED_2] = settings.preferredNotified2
+            preferences[PreferencesKeys.PREFERRED_NOTIFIED_3] = settings.preferredNotified3
 
             preferences[PreferencesKeys.ONLY_NOTIFY_WHEN_BLE_CONNECTED] = settings.onlyNotifyWhenBleConnected
             preferences[PreferencesKeys.NOTIFICATION_INTERVAL_MINUTES] = settings.notificationIntervalMinutes
@@ -222,9 +248,9 @@ class PreferenceManager @Inject constructor(private val context: Context) {
             preferences[PreferencesKeys.NOTIFIED_AT_END_OF_AFTERNOON] = settings.notifiedAtEndOfAfternoon
             preferences[PreferencesKeys.NOTIFIED_AT_END_OF_EVENING] = settings.notifiedAtEndOfEvening
 
-            preferences[PreferencesKeys.NOTIFIED_IN_SLOT_MORNING] = settings.morningNotifiedInSlot
-            preferences[PreferencesKeys.NOTIFIED_IN_SLOT_AFTERNOON] = settings.afternoonNotifiedInSlot
-            preferences[PreferencesKeys.NOTIFIED_IN_SLOT_EVENING] = settings.eveningNotifiedInSlot
+            preferences[PreferencesKeys.NOTIFIED_IN_SLOT_MORNING] = settings.chanceNotifiedMorning
+            preferences[PreferencesKeys.NOTIFIED_IN_SLOT_AFTERNOON] = settings.chanceNotifiedAfternoon
+            preferences[PreferencesKeys.NOTIFIED_IN_SLOT_EVENING] = settings.chanceNotifiedEvening
 
             if (settings.lastDeviceAddress != null) {
                 preferences[PreferencesKeys.LAST_DEVICE_ADDRESS] = settings.lastDeviceAddress
@@ -256,7 +282,10 @@ class PreferenceManager @Inject constructor(private val context: Context) {
         }
     }
 
-    suspend fun updateInSlotNotificationFlags(
+    /**
+     * 枠内チャンス通知（BLE接続時）の通知済みフラグを更新する。
+     */
+    suspend fun updateChanceNotificationFlags(
         morning: Boolean,
         afternoon: Boolean,
         evening: Boolean
@@ -265,6 +294,21 @@ class PreferenceManager @Inject constructor(private val context: Context) {
             preferences[PreferencesKeys.NOTIFIED_IN_SLOT_MORNING] = morning
             preferences[PreferencesKeys.NOTIFIED_IN_SLOT_AFTERNOON] = afternoon
             preferences[PreferencesKeys.NOTIFIED_IN_SLOT_EVENING] = evening
+        }
+    }
+
+    /**
+     * 通知推奨時刻（1〜3）の通知済みフラグを更新する。
+     */
+    suspend fun updatePreferredNotificationFlags(
+        preferred1: Boolean,
+        preferred2: Boolean,
+        preferred3: Boolean
+    ) {
+        context.dataStore.edit { preferences ->
+            preferences[PreferencesKeys.PREFERRED_NOTIFIED_1] = preferred1
+            preferences[PreferencesKeys.PREFERRED_NOTIFIED_2] = preferred2
+            preferences[PreferencesKeys.PREFERRED_NOTIFIED_3] = preferred3
         }
     }
 

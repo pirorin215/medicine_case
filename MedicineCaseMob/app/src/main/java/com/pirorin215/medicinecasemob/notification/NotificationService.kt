@@ -57,7 +57,7 @@ class NotificationService @Inject constructor(
         // 1. Get all enabled schedules sorted by end time (descending)
         val enabledSchedules = schedules.filter { it.enabled }.sortedByDescending { it.endMinuteOfDay }
 
-        // --- NEW: In-slot (Intelligent) Notification Logic ---
+        // --- In-slot (Intelligent) Notification Logic ---
         // Find if we are currently WITHIN an active slot
         val currentSlot = enabledSchedules.find {
             currentMinutes in it.startMinuteOfDay until it.endMinuteOfDay
@@ -65,48 +65,70 @@ class NotificationService @Inject constructor(
 
         if (currentSlot != null) {
             val scheduleType = ScheduleType.fromId(currentSlot.id) ?: return
-            
+
             // Check if already taken
             val alreadyTaken = todayRecord?.isTaken(scheduleType) == true
 
             if (!alreadyTaken) {
-                val alreadyNotifiedInSlot = when (scheduleType) {
-                    ScheduleType.MORNING -> appSettings.morningNotifiedInSlot
-                    ScheduleType.AFTERNOON -> appSettings.afternoonNotifiedInSlot
-                    ScheduleType.EVENING -> appSettings.eveningNotifiedInSlot
+                // --- Preferred-time notifications (枠とは独立した最大3つの時刻) ---
+                // 推奨時刻が現在進行中の有効枠内にあり、到達済みで未通知なら通知する。
+                // 有効な枠の範囲外に設定された推奨時刻は無視される。
+                val preferredConfigs = listOf(
+                    Triple(1, appSettings.preferredReminderMinute1, appSettings.preferredNotified1),
+                    Triple(2, appSettings.preferredReminderMinute2, appSettings.preferredNotified2),
+                    Triple(3, appSettings.preferredReminderMinute3, appSettings.preferredNotified3)
+                )
+                val triggeredPreferred = preferredConfigs.firstOrNull { (_, preferredMinutes, notified) ->
+                    !notified &&
+                        preferredMinutes in currentSlot.startMinuteOfDay until currentSlot.endMinuteOfDay &&
+                        currentMinutes >= preferredMinutes
                 }
 
-                if (!alreadyNotifiedInSlot) {
-                    // Check triggers: BLE connect (force) OR Preferred Time reached
-                    val preferredMinutes = when (scheduleType) {
-                        ScheduleType.MORNING -> appSettings.morningReminderMinute
-                        ScheduleType.AFTERNOON -> appSettings.afternoonReminderMinute
-                        ScheduleType.EVENING -> appSettings.eveningReminderMinute
-                    }
-                    val preferredHour = preferredMinutes / 60
-                    val preferredMinute = preferredMinutes % 60
+                if (triggeredPreferred != null) {
+                    val (preferredIndex, preferredMinutes, _) = triggeredPreferred
+                    logManager.d(TAG, "In-slot notification triggered: preferred time #$preferredIndex reached (${preferredMinutes / 60}:${preferredMinutes % 60})")
+                    sendNotification(scheduleType, isInSlot = true)
 
-                    var shouldNotifyInSlot = false
-                    if (forceNotification) {
-                        shouldNotifyInSlot = true
-                        logManager.d(TAG, "In-slot notification triggered: BLE connected (force)")
-                    } else if (currentMinutes >= preferredMinutes) {
-                        shouldNotifyInSlot = true
-                        logManager.d(TAG, "In-slot notification triggered: Preferred time reached ($preferredHour:$preferredMinute)")
-                    }
+                    repository.updatePreferredNotificationFlags(
+                        preferred1 = appSettings.preferredNotified1 || preferredIndex == 1,
+                        preferred2 = appSettings.preferredNotified2 || preferredIndex == 2,
+                        preferred3 = appSettings.preferredNotified3 || preferredIndex == 3
+                    )
+                    repository.updateLastNotificationTimestamp(currentTimeSeconds.toLong())
+                    return // Exit after sending in-slot notification
+                }
 
-                    if (shouldNotifyInSlot) {
-                        sendNotification(scheduleType, isInSlot = true)
+                // --- Chance notification (BLE connected within slot) ---
+                // チャンス通知は枠につき1日最大1回
+                val chanceNotified = when (scheduleType) {
+                    ScheduleType.MORNING -> appSettings.chanceNotifiedMorning
+                    ScheduleType.AFTERNOON -> appSettings.chanceNotifiedAfternoon
+                    ScheduleType.EVENING -> appSettings.chanceNotifiedEvening
+                }
 
-                        // Update in-slot notification flag
-                        when (scheduleType) {
-                            ScheduleType.MORNING -> repository.updateInSlotNotificationFlags(morning = true, afternoon = appSettings.afternoonNotifiedInSlot, evening = appSettings.eveningNotifiedInSlot)
-                            ScheduleType.AFTERNOON -> repository.updateInSlotNotificationFlags(morning = appSettings.morningNotifiedInSlot, afternoon = true, evening = appSettings.eveningNotifiedInSlot)
-                            ScheduleType.EVENING -> repository.updateInSlotNotificationFlags(morning = appSettings.morningNotifiedInSlot, afternoon = appSettings.afternoonNotifiedInSlot, evening = true)
-                        }
-                        repository.updateLastNotificationTimestamp(currentTimeSeconds.toLong())
-                        return // Exit after sending in-slot notification
+                if (forceNotification && !chanceNotified) {
+                    logManager.d(TAG, "Chance notification triggered: BLE connected within slot")
+                    sendNotification(scheduleType, isInSlot = true)
+
+                    when (scheduleType) {
+                        ScheduleType.MORNING -> repository.updateChanceNotificationFlags(
+                            morning = true,
+                            afternoon = appSettings.chanceNotifiedAfternoon,
+                            evening = appSettings.chanceNotifiedEvening
+                        )
+                        ScheduleType.AFTERNOON -> repository.updateChanceNotificationFlags(
+                            morning = appSettings.chanceNotifiedMorning,
+                            afternoon = true,
+                            evening = appSettings.chanceNotifiedEvening
+                        )
+                        ScheduleType.EVENING -> repository.updateChanceNotificationFlags(
+                            morning = appSettings.chanceNotifiedMorning,
+                            afternoon = appSettings.chanceNotifiedAfternoon,
+                            evening = true
+                        )
                     }
+                    repository.updateLastNotificationTimestamp(currentTimeSeconds.toLong())
+                    return // Exit after sending in-slot notification
                 }
             }
         }
