@@ -28,10 +28,7 @@ uint32_t g_lastIntakeTimestamp = 0;
 LSM6DS3* g_lsm6ds3 = nullptr;
 float g_currentPitch = 0.0f;
 float g_currentRoll = 0.0f;
-float g_stablePitch = 0.0f;
-float g_stableRoll = 0.0f;
 IntakeDetectionState g_detectionState = DETECTION_STATE_IDLE;
-unsigned long g_movementStartTime = 0;
 
 // Detection settings (configurable via BLE)
 float g_movementThreshold = DEFAULT_MOVEMENT_THRESHOLD_DEG;

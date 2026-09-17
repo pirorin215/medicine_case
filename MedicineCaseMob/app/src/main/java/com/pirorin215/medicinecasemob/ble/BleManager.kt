@@ -20,6 +20,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.ParcelUuid
 import com.pirorin215.medicinecasemob.util.LogManager
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,9 +30,6 @@ import kotlinx.coroutines.withTimeout
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 data class IntakeEventItem(
     val receivedAt: Long,        // スマホで受信した日時 (Unix timestamp in ms)
@@ -42,7 +40,7 @@ data class IntakeEventItem(
 @Singleton
 class BleManager @Inject constructor(
     private val logManager: LogManager,
-    private val context: Context
+    @ApplicationContext private val context: Context
 ) {
     companion object {
         private const val TAG = "BleManager"

@@ -4,7 +4,6 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.pirorin215.medicinecasemob.ble.BleManager
-import com.pirorin215.medicinecasemob.ui.data.MedicineIntakeRecord
 import com.pirorin215.medicinecasemob.ui.data.MedicineRepository
 import com.pirorin215.medicinecasemob.ui.data.MedicineSchedule
 import com.pirorin215.medicinecasemob.ui.data.ScheduleType
@@ -54,8 +53,6 @@ class DebugViewModel @Inject constructor(
     // Service ready
     val serviceReady = bleManager.serviceReady
 
-    // Last intake timestamp from firmware
-    val lastIntakeTimestamp = bleManager.lastIntakeTimestamp
 
     // Firmware version
     val firmwareVersion = bleManager.firmwareVersion
@@ -63,17 +60,11 @@ class DebugViewModel @Inject constructor(
     // Scan results
     val scanResults = bleManager.scanResults
 
-    // Today's record
-    private val _todayRecord = MutableStateFlow<MedicineIntakeRecord?>(null)
-    val todayRecord: StateFlow<MedicineIntakeRecord?> = _todayRecord.asStateFlow()
 
     // Latest firmware response (for debug)
     private val _latestFirmwareResponse = MutableStateFlow<String>("待機中...")
     val latestFirmwareResponse: StateFlow<String> = _latestFirmwareResponse.asStateFlow()
 
-    // Latest intake info
-    private val _latestIntakeInfo = MutableStateFlow<String>("未受信")
-    val latestIntakeInfo: StateFlow<String> = _latestIntakeInfo.asStateFlow()
 
     // Intake event history (with schedule determination)
     private val _intakeHistory = MutableStateFlow<List<IntakeEventHistoryItem>>(emptyList())
@@ -112,7 +103,6 @@ class DebugViewModel @Inject constructor(
 
     // Schedules for determining intake periods
     private val _schedules = MutableStateFlow<List<MedicineSchedule>>(emptyList())
-    val schedules: StateFlow<List<MedicineSchedule>> = _schedules.asStateFlow()
 
     // Predefined commands
     val predefinedCommands = listOf(
@@ -130,22 +120,11 @@ class DebugViewModel @Inject constructor(
     val manualCommandInput: StateFlow<String> = _manualCommandInput.asStateFlow()
 
     init {
-        loadTodayRecord()
         loadSchedules()
-        observeIntakeTimestamp()
         observeIntakeHistory()
         observeFirmwareResponse()
     }
 
-    private fun loadTodayRecord() {
-        viewModelScope.launch {
-            val todayStart = repository.getTodayStartTimestamp()
-
-            repository.getAllIntakeRecords().collect { records ->
-                _todayRecord.value = records.find { it.date == todayStart }
-            }
-        }
-    }
 
     private fun loadSchedules() {
         viewModelScope.launch {
@@ -180,19 +159,6 @@ class DebugViewModel @Inject constructor(
         }
     }
 
-    private fun observeIntakeTimestamp() {
-        viewModelScope.launch {
-            bleManager.lastIntakeTimestamp.collect { timestamp ->
-                if (timestamp != null) {
-                    val date = Date(timestamp * 1000)
-                    val format = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.JAPAN)
-                    _latestIntakeInfo.value = format.format(date)
-                } else {
-                    _latestIntakeInfo.value = "未受信"
-                }
-            }
-        }
-    }
 
     private fun observeFirmwareResponse() {
         viewModelScope.launch {
@@ -202,15 +168,6 @@ class DebugViewModel @Inject constructor(
         }
     }
 
-    fun getIntakeFromFirmware() {
-        Log.d(TAG, "Getting intake from firmware")
-        bleManager.getIntake()
-    }
-
-    fun syncTimeToFirmware() {
-        Log.d(TAG, "Syncing time to firmware")
-        bleManager.syncTime()
-    }
 
     fun onPredefinedCommandSelected(command: String) {
         _selectedPredefinedCommand.value = command
@@ -245,27 +202,11 @@ class DebugViewModel @Inject constructor(
         return "${format.format(date)}"
     }
 
-    fun formatTimeOnly(timestamp: Long): String {
-        if (timestamp == 0L) return "--:--:--"
-        val date = Date(timestamp * 1000)
-        val format = SimpleDateFormat("HH:mm:ss", Locale.JAPAN)
-        return format.format(date)
-    }
-
-    fun formatDateOnly(timestamp: Long): String {
-        if (timestamp == 0L) return "未設定"
-        val date = Date(timestamp * 1000)
-        val format = SimpleDateFormat("yyyy-MM-dd", Locale.JAPAN)
-        return format.format(date)
-    }
 
     fun getDeviceInfo(): String {
-        val state = bleConnectionState.value
-        return when (state) {
-            is BleManager.ConnectionState.Connected -> {
-                val device = (state as BleManager.ConnectionState.Connected).device
-                "接続中\nデバイス: ${device.name}\nアドレス: ${device.address}"
-            }
+        return when (val state = bleConnectionState.value) {
+            is BleManager.ConnectionState.Connected ->
+                "接続中\nデバイス: ${state.device.name}\nアドレス: ${state.device.address}"
             BleManager.ConnectionState.Disconnected -> "未接続"
             BleManager.ConnectionState.Scanning -> "スキャン中"
             BleManager.ConnectionState.Connecting -> "接続中"
@@ -343,12 +284,7 @@ class DebugViewModel @Inject constructor(
 
             // Check if current time is within schedule range
             if (currentMinutes in startMinutes..endMinutes) {
-                val result = when (schedule.id) {
-                    0 -> ScheduleType.MORNING
-                    1 -> ScheduleType.AFTERNOON
-                    2 -> ScheduleType.EVENING
-                    else -> null
-                }
+                val result = ScheduleType.fromId(schedule.id)
                 Log.d(TAG, "Schedule match found: $result (schedule.id=${schedule.id})")
                 return result
             }

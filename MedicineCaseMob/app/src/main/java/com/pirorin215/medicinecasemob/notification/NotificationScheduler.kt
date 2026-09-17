@@ -2,10 +2,12 @@ package com.pirorin215.medicinecasemob.notification
 
 import android.content.Context
 import com.pirorin215.medicinecasemob.util.LogManager
+import com.pirorin215.medicinecasemob.ble.BleManager
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.pirorin215.medicinecasemob.ui.data.MedicineRepository
+import com.pirorin215.medicinecasemob.ui.data.MedicineSchedule
 import com.pirorin215.medicinecasemob.ui.data.ScheduleType
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -19,7 +21,7 @@ import java.util.Calendar
 class NotificationScheduler @AssistedInject constructor(
     private val repository: MedicineRepository,
     private val notificationService: NotificationService,
-    private val bleManager: com.pirorin215.medicinecasemob.ble.BleManager,
+    private val bleManager: BleManager,
     @Assisted private val context: Context,
     @Assisted private val params: WorkerParameters
 ) : CoroutineWorker(context, params) {
@@ -56,7 +58,7 @@ class NotificationScheduler @AssistedInject constructor(
 
             // 取得後の最新 DB 状態で通知判定（ensureTodayRecordExists は最新レコードを再取得する）
             val todayRecord = repository.ensureTodayRecordExists()
-            val isConnectedToBle = bleManager.connectionState.value is com.pirorin215.medicinecasemob.ble.BleManager.ConnectionState.Connected
+            val isConnectedToBle = bleManager.connectionState.value is BleManager.ConnectionState.Connected
 
             notificationService.checkAndNotifyMissedIntakes(
                 schedules = schedules,
@@ -77,7 +79,7 @@ class NotificationScheduler @AssistedInject constructor(
      * 取得の必要性判定にのみ使用する。
      */
     private suspend fun hasUntakenCurrentSlot(
-        schedules: List<com.pirorin215.medicinecasemob.ui.data.MedicineSchedule>
+        schedules: List<MedicineSchedule>
     ): Boolean {
         val log = LogManager.getInstance()
         val calendar = Calendar.getInstance()
@@ -117,7 +119,7 @@ class NotificationScheduler @AssistedInject constructor(
         }
 
         val initialState = bleManager.connectionState.value
-        val alreadyConnected = initialState is com.pirorin215.medicinecasemob.ble.BleManager.ConnectionState.Connected
+        val alreadyConnected = initialState is BleManager.ConnectionState.Connected
         var weConnected = false
 
         try {
@@ -142,9 +144,9 @@ class NotificationScheduler @AssistedInject constructor(
                 val watcher = launch {
                     bleManager.scanResults.collect { results ->
                         if (results.isEmpty()) return@collect
-                        if (bleManager.connectionState.value is com.pirorin215.medicinecasemob.ble.BleManager.ConnectionState.Disconnected) {
+                        if (bleManager.connectionState.value is BleManager.ConnectionState.Disconnected) {
                             results.firstOrNull {
-                                it.device.name?.startsWith(com.pirorin215.medicinecasemob.ble.BleManager.DEVICE_NAME_PREFIX) == true
+                                it.device.name?.startsWith(BleManager.DEVICE_NAME_PREFIX) == true
                             }?.let { bleManager.connectToDevice(it.device) }
                         }
                     }

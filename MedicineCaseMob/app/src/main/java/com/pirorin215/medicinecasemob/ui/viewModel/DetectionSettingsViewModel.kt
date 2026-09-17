@@ -5,6 +5,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.pirorin215.medicinecasemob.ble.BleManager
 import com.pirorin215.medicinecasemob.ui.data.AppSettingsData
+import com.pirorin215.medicinecasemob.ui.data.MedicineRepository
+import com.pirorin215.medicinecasemob.util.LogManager
+import kotlinx.coroutines.delay
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -15,7 +18,7 @@ import javax.inject.Inject
 
 @HiltViewModel
 class DetectionSettingsViewModel @Inject constructor(
-    private val repository: com.pirorin215.medicinecasemob.ui.data.MedicineRepository,
+    private val repository: MedicineRepository,
     private val bleManager: BleManager
 ) : ViewModel() {
 
@@ -68,7 +71,7 @@ class DetectionSettingsViewModel @Inject constructor(
                 repository.updateSettings(updated)
 
                 // Log and BLE update
-                val logManager = com.pirorin215.medicinecasemob.util.LogManager.getInstance()
+                val logManager = LogManager.getInstance()
                 logManager.addInfoLog("=== 検知設定変更・保存 ===")
                 logManager.addInfoLog("検出角度: ${updated.movementThreshold}°")
                 logManager.addInfoLog("クールダウン: ${updated.cooldownTime}ms")
@@ -81,15 +84,13 @@ class DetectionSettingsViewModel @Inject constructor(
                     bleManager.setDetectionAngle(_movementThreshold.value)
                     // Wait for first command to complete before sending second
                     // (Processing takes ~800ms based on logs)
-                    kotlinx.coroutines.delay(1000)
+                    delay(1000)
                     bleManager.setDetectionCooldown(_cooldownTime.value.toLong())
-                    _saveSuccess.value = "設定を保存してマイコンに送信しました"
                 } else {
                     _saveSuccess.value = "設定を保存しました（マイコン未接続）"
                 }
 
-                kotlinx.coroutines.delay(3000)
-                _saveSuccess.value = null
+                delay(3000)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to save detection settings", e)
                 _saveSuccess.value = "設定の保存に失敗しました"

@@ -406,17 +406,9 @@ fun HistoryRecordRow(
 
             // Show all 3 periods inline
             ScheduleType.entries.forEach { type ->
-                val enabled = when (type) {
-                    ScheduleType.MORNING -> record.morningEnabled
-                    ScheduleType.AFTERNOON -> record.afternoonEnabled
-                    ScheduleType.EVENING -> record.eveningEnabled
-                }
-                val taken = when (type) {
-                    ScheduleType.MORNING -> record.morningTaken
-                    ScheduleType.AFTERNOON -> record.afternoonTaken
-                    ScheduleType.EVENING -> record.eveningTaken
-                }
-                
+                val enabled = record.isEnabled(type)
+                val taken = record.isTaken(type)
+
                 Text(
                     text = if (!enabled) {
                         "　${type.displayName}"
@@ -564,21 +556,9 @@ fun RecordDetailsDialog(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 ScheduleType.entries.forEach { type ->
-                    val enabled = when (type) {
-                        ScheduleType.MORNING -> record.morningEnabled
-                        ScheduleType.AFTERNOON -> record.afternoonEnabled
-                        ScheduleType.EVENING -> record.eveningEnabled
-                    }
-                    val taken = when (type) {
-                        ScheduleType.MORNING -> record.morningTaken
-                        ScheduleType.AFTERNOON -> record.afternoonTaken
-                        ScheduleType.EVENING -> record.eveningTaken
-                    }
-                    val mcuTime = when (type) {
-                        ScheduleType.MORNING -> record.morningTime
-                        ScheduleType.AFTERNOON -> record.afternoonTime
-                        ScheduleType.EVENING -> record.eveningTime
-                    }
+                    val enabled = record.isEnabled(type)
+                    val taken = record.isTaken(type)
+                    val mcuTime = record.timeOf(type)
 
                     val statusText = when {
                         !enabled -> "設定なし"

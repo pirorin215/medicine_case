@@ -28,6 +28,3 @@ fun getScaledTypography(scale: Float): Typography {
         labelSmall = defaultTypography.labelSmall.copy(fontSize = defaultTypography.labelSmall.fontSize * scale)
     )
 }
-
-// Initial default typography (scale 1.0)
-val Typography = getScaledTypography(1.0f)

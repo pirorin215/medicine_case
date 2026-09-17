@@ -8,13 +8,14 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import java.io.IOException
+import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
 
 @Singleton
-class PreferenceManager @Inject constructor(private val context: Context) {
+class PreferenceManager @Inject constructor(@ApplicationContext private val context: Context) {
 
     private object PreferencesKeys {
         // New Minute-based Storage

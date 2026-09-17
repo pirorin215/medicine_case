@@ -106,26 +106,6 @@ void updateLedStateBasedOnStatus() {
 
 // --- Logging Functions ---
 
-void setupLog() {
-    // Serial buffer configuration not available on this platform
-    // Serial.setTxBufferSize(2048);
-    // Serial.setRxBufferSize(2048);
-
-    // シリアルポートが確実に初期化されるのを待つ
-    delay(500);
-
-    // テストメッセージを送信
-    Serial.println();
-    Serial.println("========================================");
-    Serial.printf("Medicine Case v%d.%d.%d\n", FIRMWARE_VERSION_MAJOR, FIRMWARE_VERSION_MINOR, FIRMWARE_VERSION_PATCH);
-    Serial.println("✅ Serial port ready (115200 baud)");
-    Serial.println("✅ Logging system initialized");
-    Serial.println("========================================");
-    Serial.println();
-
-    logPrint("LOG", "📡 Serial communication started");
-}
-
 void logPrint(const char* tag, const char* format, ...) {
     char buffer[256];
     va_list args;
@@ -148,18 +128,6 @@ void logPrint(const char* tag, const char* format, ...) {
     va_end(args);
 
     // Print to serial and flush immediately
-    Serial.println(buffer);
-    Serial.flush();
-}
-
-void logPrintRaw(const char* format, ...) {
-    va_list args;
-    char buffer[256];
-
-    va_start(args, format);
-    vsnprintf(buffer, sizeof(buffer), format, args);
-    va_end(args);
-
     Serial.println(buffer);
     Serial.flush();
 }

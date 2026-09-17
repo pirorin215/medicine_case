@@ -3,7 +3,6 @@ package com.pirorin215.medicinecasemob.ui.data
 import com.pirorin215.medicinecasemob.util.LogManager
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.firstOrNull
 import java.util.Calendar
 
 class MedicineRepository(

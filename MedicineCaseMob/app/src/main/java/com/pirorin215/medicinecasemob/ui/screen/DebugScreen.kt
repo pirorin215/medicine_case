@@ -44,6 +44,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.pirorin215.medicinecasemob.ble.BleManager
 import com.pirorin215.medicinecasemob.ui.viewModel.DebugViewModel
+import com.pirorin215.medicinecasemob.ui.viewModel.HistoryFilter
+import com.pirorin215.medicinecasemob.ui.viewModel.IntakeEventHistoryItem
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 
@@ -242,23 +244,23 @@ fun DebugScreen(
                     ) {
                         HistoryFilterButton(
                             text = "ALL",
-                            selected = historyFilter == com.pirorin215.medicinecasemob.ui.viewModel.HistoryFilter.ALL,
-                            onClick = { viewModel.setHistoryFilter(com.pirorin215.medicinecasemob.ui.viewModel.HistoryFilter.ALL) }
+                            selected = historyFilter == HistoryFilter.ALL,
+                            onClick = { viewModel.setHistoryFilter(HistoryFilter.ALL) }
                         )
                         HistoryFilterButton(
                             text = "time",
-                            selected = historyFilter == com.pirorin215.medicinecasemob.ui.viewModel.HistoryFilter.TIME,
-                            onClick = { viewModel.setHistoryFilter(com.pirorin215.medicinecasemob.ui.viewModel.HistoryFilter.TIME) }
+                            selected = historyFilter == HistoryFilter.TIME,
+                            onClick = { viewModel.setHistoryFilter(HistoryFilter.TIME) }
                         )
                         HistoryFilterButton(
                             text = "detection",
-                            selected = historyFilter == com.pirorin215.medicinecasemob.ui.viewModel.HistoryFilter.DETECTION,
-                            onClick = { viewModel.setHistoryFilter(com.pirorin215.medicinecasemob.ui.viewModel.HistoryFilter.DETECTION) }
+                            selected = historyFilter == HistoryFilter.DETECTION,
+                            onClick = { viewModel.setHistoryFilter(HistoryFilter.DETECTION) }
                         )
                         HistoryFilterButton(
                             text = "intake",
-                            selected = historyFilter == com.pirorin215.medicinecasemob.ui.viewModel.HistoryFilter.INTAKE,
-                            onClick = { viewModel.setHistoryFilter(com.pirorin215.medicinecasemob.ui.viewModel.HistoryFilter.INTAKE) }
+                            selected = historyFilter == HistoryFilter.INTAKE,
+                            onClick = { viewModel.setHistoryFilter(HistoryFilter.INTAKE) }
                         )
                         Spacer(modifier = Modifier.weight(1f))
                         HistoryFilterButton(
@@ -366,7 +368,7 @@ private fun HistoryFilterButton(
 
 @Composable
 private fun IntakeHistoryItem(
-    event: com.pirorin215.medicinecasemob.ui.viewModel.IntakeEventHistoryItem,
+    event: IntakeEventHistoryItem,
     viewModel: DebugViewModel
 ) {
     Card(

@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.pirorin215.medicinecasemob.ble.BleManager
 import com.pirorin215.medicinecasemob.ui.data.AppSettingsData
+import com.pirorin215.medicinecasemob.ui.data.MedicineRepository
 import com.pirorin215.medicinecasemob.ui.data.MedicineSchedule
 import com.pirorin215.medicinecasemob.ui.data.ScheduleType
 import com.pirorin215.medicinecasemob.ui.data.formatTimeOfDay
@@ -24,7 +25,7 @@ import javax.inject.Inject
 
 @HiltViewModel
 class ScheduleSettingsViewModel @Inject constructor(
-    private val repository: com.pirorin215.medicinecasemob.ui.data.MedicineRepository,
+    private val repository: MedicineRepository,
     private val logManager: LogManager,
     private val bleManager: BleManager
 ) : ViewModel() {

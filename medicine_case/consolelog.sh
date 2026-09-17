@@ -41,7 +41,6 @@ while true; do
     # Should be active
     if ! $CAT_ACTIVE; then
       # デバイスを見つけて cat 開始
-      DEVICE=$(ls $DEVICE_PATTERN 2>/dev/null | head -n 1)
       echo "--- Serial console started at $(date) ---"
       CAT_ACTIVE=true
     fi

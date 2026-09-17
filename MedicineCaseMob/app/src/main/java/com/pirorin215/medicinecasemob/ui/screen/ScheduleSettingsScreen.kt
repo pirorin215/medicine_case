@@ -41,6 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.pirorin215.medicinecasemob.ui.data.AppSettingsData
+import com.pirorin215.medicinecasemob.ui.data.formatTimeOfDay
 import com.pirorin215.medicinecasemob.ui.data.ScheduleType
 import com.pirorin215.medicinecasemob.ui.viewModel.ScheduleSettingsViewModel
 import androidx.compose.material.icons.Icons
@@ -197,7 +198,7 @@ fun ScheduleSettingsScreen(
                                 }
                             ) {
                                 Text(
-                                    text = "%02d:%02d".format(minuteOfDay / 60, minuteOfDay % 60),
+                                    text = minuteOfDay.formatTimeOfDay(),
                                     style = MaterialTheme.typography.bodyMedium
                                 )
                             }
@@ -276,19 +277,18 @@ fun ScheduleSettingsScreen(
                             )
                         }
                     }
-                    }
-                    }
+                }
+            }
 
-
-                    // --- UI Settings ---
-                    Card(
-                    modifier = Modifier.fillMaxWidth()
-                    ) {
-                    Column(
+            // --- UI Settings ---
+            Card(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(16.dp)
-                    ) {
+                ) {
                     Text(
                         text = "表示設定",
                         style = MaterialTheme.typography.titleMedium,
@@ -316,11 +316,10 @@ fun ScheduleSettingsScreen(
                         valueRange = 0.8f..2.0f,
                         steps = 11 // 0.1 increments
                     )
-                    }
-                    }
+                }
+            }
 
-
-                    // Info Card
+            // Info Card
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(

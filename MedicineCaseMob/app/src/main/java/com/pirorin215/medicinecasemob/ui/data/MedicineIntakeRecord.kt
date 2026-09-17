@@ -22,11 +22,25 @@ data class MedicineIntakeRecord(
     val eveningReceivedTime: Long = 0L,  // スマホ受信時刻 (Unix timestamp in seconds)
     val eveningEnabled: Boolean = true
 ) {
+    /** 指定した枠が有効かどうか */
+    fun isEnabled(scheduleType: ScheduleType): Boolean = when (scheduleType) {
+        ScheduleType.MORNING -> morningEnabled
+        ScheduleType.AFTERNOON -> afternoonEnabled
+        ScheduleType.EVENING -> eveningEnabled
+    }
+
     /** 指定した枠が服薬済みかどうか */
     fun isTaken(scheduleType: ScheduleType): Boolean = when (scheduleType) {
         ScheduleType.MORNING -> morningTaken
         ScheduleType.AFTERNOON -> afternoonTaken
         ScheduleType.EVENING -> eveningTaken
+    }
+
+    /** 指定した枠の服薬時刻（マイコン時刻） */
+    fun timeOf(scheduleType: ScheduleType): Long = when (scheduleType) {
+        ScheduleType.MORNING -> morningTime
+        ScheduleType.AFTERNOON -> afternoonTime
+        ScheduleType.EVENING -> eveningTime
     }
 
     /** 指定した枠に服薬記録を反映した新しいレコードを返す */

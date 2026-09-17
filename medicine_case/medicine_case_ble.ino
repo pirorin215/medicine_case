@@ -160,30 +160,21 @@ void setupBLE() {
     // BLECharacteristic::begin() uses BLEService::lastService
     bleService.begin();
 
-    // Begin characteristics with error checking
+    // Begin characteristics with error checking.
     // If sd_ble_gatts_characteristic_add() fails (e.g., NRF_ERROR_NO_MEM),
-    // the characteristic won't be discoverable by clients
-    err_t err;
-
-    err = bleCommandCharacteristic.begin();
-    if (err != ERROR_NONE) {
-        logPrint("BLE", "ERROR: Command characteristic begin() failed: 0x%02X", err);
-    } else {
-        logPrint("BLE", "Command characteristic added successfully");
-    }
-
-    err = bleResponseCharacteristic.begin();
-    if (err != ERROR_NONE) {
-        logPrint("BLE", "ERROR: Response characteristic begin() failed: 0x%02X", err);
-    } else {
-        logPrint("BLE", "Response characteristic added successfully");
-    }
-
-    err = bleSensorCharacteristic.begin();
-    if (err != ERROR_NONE) {
-        logPrint("BLE", "ERROR: Sensor characteristic begin() failed: 0x%02X", err);
-    } else {
-        logPrint("BLE", "Sensor characteristic added successfully");
+    // the characteristic won't be discoverable by clients.
+    const struct { const char* name; BLECharacteristic* characteristic; } characteristics[] = {
+        {"Command", &bleCommandCharacteristic},
+        {"Response", &bleResponseCharacteristic},
+        {"Sensor", &bleSensorCharacteristic},
+    };
+    for (const auto& spec : characteristics) {
+        err_t err = spec.characteristic->begin();
+        if (err != ERROR_NONE) {
+            logPrint("BLE", "ERROR: %s characteristic begin() failed: 0x%02X", spec.name, err);
+        } else {
+            logPrint("BLE", "%s characteristic added successfully", spec.name);
+        }
     }
 
     Serial.flush();

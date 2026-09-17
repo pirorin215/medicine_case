@@ -97,15 +97,11 @@ bool detectMedicineIntake() {
 
     switch (g_detectionState) {
         case DETECTION_STATE_IDLE:
-            // Check if we're in cooldown period
-            if (lastDetectionTime > 0 &&
-                (g_currentMillis - lastDetectionTime < g_cooldownTime)) {
-                break;
-            }
-
-            // After cooldown expires, reset for next detection
-            if (lastDetectionTime > 0 &&
-                (g_currentMillis - lastDetectionTime >= g_cooldownTime)) {
+            // Skip while in cooldown; once expired, reset for next detection
+            if (lastDetectionTime > 0) {
+                if (g_currentMillis - lastDetectionTime < g_cooldownTime) {
+                    break;
+                }
                 initialPositionSet = false;
                 maxChange = 0.0f;
                 logPrint("SENSOR", "Cooldown expired. Ready for next detection.");
@@ -186,8 +182,7 @@ bool detectMedicineIntake() {
             }
 
             // Check if movement has stopped
-            if ((g_currentMillis - movementStartTime > MOVEMENT_STABILITY_MS) ||
-                (g_currentMillis - movementStartTime > 2000)) {
+            if (g_currentMillis - movementStartTime > MOVEMENT_STABILITY_MS) {
 
                 logPrint("SENSOR", "Movement completed. Max change: %.2f degrees", maxChange);
 

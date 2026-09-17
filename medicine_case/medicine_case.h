@@ -13,7 +13,7 @@ using namespace Adafruit_LittleFS_Namespace;
 // --- Firmware Version Information ---
 #define FIRMWARE_VERSION_MAJOR 1
 #define FIRMWARE_VERSION_MINOR 1
-#define FIRMWARE_VERSION_PATCH 4
+#define FIRMWARE_VERSION_PATCH 5
 
 // --- BLE Settings ---
 #define BLE_DEVICE_NAME       "MedicineCase-0001"
@@ -69,10 +69,7 @@ extern uint32_t g_lastIntakeTimestamp;
 extern LSM6DS3* g_lsm6ds3;                    // 6-axis sensor
 extern float g_currentPitch;                  // Current pitch angle
 extern float g_currentRoll;                   // Current roll angle
-extern float g_stablePitch;                   // Stable pitch angle
-extern float g_stableRoll;                    // Stable roll angle
 extern IntakeDetectionState g_detectionState; // Detection state
-extern unsigned long g_movementStartTime;     // When movement started
 
 // Detection settings (configurable via BLE)
 extern float g_movementThreshold;             // Movement detection threshold (degrees)
@@ -91,10 +88,6 @@ void saveSettings();
 void sendResponse(const char* message);
 void sendSensorNotification(const char* data);
 bool startsWith(const char* &remainingCommand, const char* prefix);
-
-// LED Debug functions
-void ledDebugShowPattern(int pattern);
-void ledDebugShowAngle(float pitch, float roll);
 
 // Time functions
 void updateTimestamp();
@@ -115,9 +108,6 @@ void setLedError();
 void updateLedStateBasedOnStatus();
 
 // Logging functions
-void setupLog();
 void logPrint(const char* tag, const char* format, ...);
-void logPrintRaw(const char* format, ...);
-#define logPrintln(format, ...) logPrint("", format, ##__VA_ARGS__)
 
 #endif // MEDICINE_CASE_H

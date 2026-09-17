@@ -4,7 +4,6 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.pirorin215.medicinecasemob.ble.BleManager
-import com.pirorin215.medicinecasemob.notification.NotificationService
 import com.pirorin215.medicinecasemob.ui.data.MedicineIntakeRecord
 import com.pirorin215.medicinecasemob.ui.data.MedicineRepository
 import com.pirorin215.medicinecasemob.ui.data.MedicineSchedule
@@ -26,7 +25,6 @@ import javax.inject.Inject
 class MainViewModel @Inject constructor(
     private val repository: MedicineRepository,
     private val bleManager: BleManager,
-    private val notificationService: NotificationService,
     private val logManager: LogManager
 ) : ViewModel() {
 

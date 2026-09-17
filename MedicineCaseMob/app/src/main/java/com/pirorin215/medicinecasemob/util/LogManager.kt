@@ -71,16 +71,8 @@ class LogManager @Inject constructor() {
         addLog(tag, message, LogLevel.ERROR)
     }
 
-    fun addDebugLog(message: String) {
-        d("AppLog", message)
-    }
-
     fun addInfoLog(message: String) {
         i("AppLog", message)
-    }
-
-    fun addErrorLog(message: String) {
-        e("AppLog", message)
     }
 
     fun saveLogsToFile(context: Context): String? {

@@ -18,9 +18,7 @@ check_medicine_case_port
 echo "Medicine Caseファームウェアを $MEDICINE_CASE_PORT にアップロード..."
 echo "========================================"
 
-UPLOAD_COMMAND="arduino-cli upload -p $MEDICINE_CASE_PORT --fqbn Seeeduino:nrf52:xiaonRF52840Sense medicine_case.ino"
-
-$UPLOAD_COMMAND
+arduino-cli upload -p "$MEDICINE_CASE_PORT" --fqbn Seeeduino:nrf52:xiaonRF52840Sense medicine_case.ino
 UPLOAD_EXIT_CODE=$?
 
 echo "========================================"

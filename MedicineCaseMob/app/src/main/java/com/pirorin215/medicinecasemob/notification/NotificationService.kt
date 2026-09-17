@@ -6,6 +6,7 @@ import com.pirorin215.medicinecasemob.util.LogManager
 import androidx.core.app.NotificationCompat
 import com.pirorin215.medicinecasemob.R
 import com.pirorin215.medicinecasemob.ui.data.MedicineIntakeRecord
+import com.pirorin215.medicinecasemob.ui.data.MedicineRepository
 import com.pirorin215.medicinecasemob.ui.data.MedicineSchedule
 import com.pirorin215.medicinecasemob.ui.data.ScheduleType
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -16,14 +17,13 @@ import javax.inject.Singleton
 
 @Singleton
 class NotificationService @Inject constructor(
-    private val logManager: com.pirorin215.medicinecasemob.util.LogManager,
-    private val repository: com.pirorin215.medicinecasemob.ui.data.MedicineRepository,
+    private val logManager: LogManager,
+    private val repository: MedicineRepository,
     @ApplicationContext private val context: Context
 ) {
     companion object {
         private const val TAG = "NotificationService"
         private const val CHANNEL_ID = "medicine_reminder"
-        private const val DEFAULT_NOTIFICATION_INTERVAL_MINUTES = 60
     }
 
     /**
@@ -110,38 +110,22 @@ class NotificationService @Inject constructor(
                     logManager.d(TAG, "Chance notification triggered: BLE connected within slot")
                     sendNotification(scheduleType, isInSlot = true)
 
-                    when (scheduleType) {
-                        ScheduleType.MORNING -> repository.updateChanceNotificationFlags(
-                            morning = true,
-                            afternoon = appSettings.chanceNotifiedAfternoon,
-                            evening = appSettings.chanceNotifiedEvening
-                        )
-                        ScheduleType.AFTERNOON -> repository.updateChanceNotificationFlags(
-                            morning = appSettings.chanceNotifiedMorning,
-                            afternoon = true,
-                            evening = appSettings.chanceNotifiedEvening
-                        )
-                        ScheduleType.EVENING -> repository.updateChanceNotificationFlags(
-                            morning = appSettings.chanceNotifiedMorning,
-                            afternoon = appSettings.chanceNotifiedAfternoon,
-                            evening = true
-                        )
-                    }
+                    repository.updateChanceNotificationFlags(
+                        morning = scheduleType == ScheduleType.MORNING || appSettings.chanceNotifiedMorning,
+                        afternoon = scheduleType == ScheduleType.AFTERNOON || appSettings.chanceNotifiedAfternoon,
+                        evening = scheduleType == ScheduleType.EVENING || appSettings.chanceNotifiedEvening
+                    )
                     repository.updateLastNotificationTimestamp(currentTimeSeconds.toLong())
                     return // Exit after sending in-slot notification
                 }
             }
         }
 
-        // --- EXISTING: End-of-slot (Deadline) Notification Logic ---
-        // 2. Check if there's an active (currently running) slot
-        val activeSchedule = enabledSchedules.firstOrNull { schedule ->
-            currentMinutes in schedule.startMinuteOfDay until schedule.endMinuteOfDay
-        }
-
+        // --- End-of-slot (Deadline) Notification Logic ---
         // If there's an active slot, don't notify about previous slots
-        if (activeSchedule != null) {
-            logManager.d(TAG, "Active slot exists: ${ScheduleType.fromId(activeSchedule.id)}. Skipping notifications for previous slots.")
+        // (currentSlot above uses the same predicate as this check)
+        if (currentSlot != null) {
+            logManager.d(TAG, "Active slot exists: ${ScheduleType.fromId(currentSlot.id)}. Skipping notifications for previous slots.")
             return
         }
 
@@ -202,23 +186,11 @@ class NotificationService @Inject constructor(
 
             // Update flags
             if (!forceNotification) {
-                when (scheduleType) {
-                    ScheduleType.MORNING -> repository.updateEndNotificationFlags(
-                        morning = true,
-                        afternoon = appSettings.notifiedAtEndOfAfternoon,
-                        evening = appSettings.notifiedAtEndOfEvening
-                    )
-                    ScheduleType.AFTERNOON -> repository.updateEndNotificationFlags(
-                        morning = appSettings.notifiedAtEndOfMorning,
-                        afternoon = true,
-                        evening = appSettings.notifiedAtEndOfEvening
-                    )
-                    ScheduleType.EVENING -> repository.updateEndNotificationFlags(
-                        morning = appSettings.notifiedAtEndOfMorning,
-                        afternoon = appSettings.notifiedAtEndOfAfternoon,
-                        evening = true
-                    )
-                }
+                repository.updateEndNotificationFlags(
+                    morning = scheduleType == ScheduleType.MORNING || appSettings.notifiedAtEndOfMorning,
+                    afternoon = scheduleType == ScheduleType.AFTERNOON || appSettings.notifiedAtEndOfAfternoon,
+                    evening = scheduleType == ScheduleType.EVENING || appSettings.notifiedAtEndOfEvening
+                )
             }
 
             // Update last notification timestamp

@@ -16,8 +16,6 @@ import android.content.pm.PackageManager
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
-import android.os.Handler
-import android.os.Looper
 import com.pirorin215.medicinecasemob.util.LogManager
 import androidx.core.app.NotificationCompat
 import dagger.hilt.android.AndroidEntryPoint
@@ -27,6 +25,8 @@ import com.pirorin215.medicinecasemob.MainActivity
 import com.pirorin215.medicinecasemob.R
 import com.pirorin215.medicinecasemob.notification.NotificationService
 import com.pirorin215.medicinecasemob.ui.data.MedicineRepository
+import com.pirorin215.medicinecasemob.ui.data.MedicineSchedule
+import com.pirorin215.medicinecasemob.ui.data.ScheduleType
 import java.util.Calendar
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,7 +42,6 @@ class MedicineBleScanService : Service() {
 
     companion object {
         private const val TAG = "MedicineBleScanService"
-        const val DEVICE_NAME = "MedicineCase-0001"
         const val NOTIFICATION_ID = 1
         private const val CHANNEL_ID = "MedicineBleScanServiceChannel"
         private const val SCAN_INTERVAL_MS = 10000L // 10秒ごとのスキャン
@@ -393,7 +392,7 @@ class MedicineBleScanService : Service() {
         val todayStart = repository.getTodayStartTimestamp()
         val todayRecord = repository.getIntakeRecordByDateSync(todayStart)
 
-        val scheduleType = com.pirorin215.medicinecasemob.ui.data.ScheduleType.fromId(currentSlot.id) ?: return false
+        val scheduleType = ScheduleType.fromId(currentSlot.id) ?: return false
         val isTaken = todayRecord?.isTaken(scheduleType) == true
 
         logManager.d(TAG, "shouldPollIntake: slot=$scheduleType (lookahead), taken=$isTaken -> ${if (!isTaken) "poll" else "skip"}")
@@ -405,7 +404,7 @@ class MedicineBleScanService : Service() {
      */
     private fun startTimeSlotMonitoring() {
         serviceScope.launch {
-            var lastSlot: com.pirorin215.medicinecasemob.ui.data.MedicineSchedule? = null
+            var lastSlot: MedicineSchedule? = null
 
             while (isActive) {
                 // 1分先のスロットを監視（1分前から接続準備を開始するため）
@@ -451,7 +450,7 @@ class MedicineBleScanService : Service() {
      * 
      * @param lookAheadMinutes 先読みする時間（分）
      */
-    private suspend fun getCurrentSlot(lookAheadMinutes: Int = 0): com.pirorin215.medicinecasemob.ui.data.MedicineSchedule? {
+    private suspend fun getCurrentSlot(lookAheadMinutes: Int = 0): MedicineSchedule? {
         val calendar = Calendar.getInstance()
         val currentMinutes = calendar.get(Calendar.HOUR_OF_DAY) * 60 + calendar.get(Calendar.MINUTE) + lookAheadMinutes
 
@@ -466,11 +465,11 @@ class MedicineBleScanService : Service() {
     /**
      * 指定された枠が服薬済みかどうかを判定
      */
-    private suspend fun isSlotTaken(slot: com.pirorin215.medicinecasemob.ui.data.MedicineSchedule): Boolean {
+    private suspend fun isSlotTaken(slot: MedicineSchedule): Boolean {
         val todayStart = repository.getTodayStartTimestamp()
         val todayRecord = repository.getIntakeRecordByDateSync(todayStart) ?: return false
 
-        val scheduleType = com.pirorin215.medicinecasemob.ui.data.ScheduleType.fromId(slot.id) ?: return false
+        val scheduleType = ScheduleType.fromId(slot.id) ?: return false
 
         return todayRecord.isTaken(scheduleType)
     }
