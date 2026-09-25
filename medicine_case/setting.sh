@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/opt/homebrew/bin/bash
 # Medicine Case 設定ファイル
 # 各スクリプトから source コマンドで読み込まれます
 

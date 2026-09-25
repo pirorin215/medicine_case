@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/opt/homebrew/bin/bash
 
 # Medicine Case Upload Script for XIAO BLE Sense (nRF52840)
 
