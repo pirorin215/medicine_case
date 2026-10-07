@@ -38,8 +38,9 @@ DEFAULT_CONFIG = {
         {"name": "夜", "time": "22:00", "enabled": True},
     ],
     "remind": {"repeat_min": 30, "window_min": 120},
-    # スイッチ名は Mac 側で管理（idx は D4=0, D5=1, ... D9=5・未配線は無視される）
-    "switches": {"0": "スイッチ1", "1": "スイッチ2", "2": "スイッチ3"},
+    # スイッチ名は Mac 側で管理・必ず 6要素のリスト（idx=D4=0...D9=5・未配線は無視される）。
+    # PHP 側が数値キー連想配列を JSON リスト化するため dict は使わない（2026-10-07 クラッシュ教訓）
+    "switches": ["スイッチ1", "スイッチ2", "スイッチ3", "", "", ""],
 }
 
 # HB がこの秒数途絶えたら接続を張り直し（デバイスは60秒HB・待機中は送信なし）
@@ -69,6 +70,9 @@ def load_config():
                 merged[k] = user[k]
     except (FileNotFoundError, json.JSONDecodeError) as e:
         log("config load:", e, "→ DEFAULT 使用")
+    # 型の歪みに耐える（配置形式違いで daemon が死なないように）
+    if not isinstance(merged.get("switches"), list):
+        merged["switches"] = list(DEFAULT_CONFIG["switches"])
     return merged
 
 
@@ -176,7 +180,9 @@ def handle_line(line, setting, dev, write_line):
         dev.last_intake_by_switch[idx] = ts
 
         cfg = load_config()
-        sw_name = cfg.get("switches", {}).get(str(idx)) or "スイッチ%d" % (idx + 1)
+        sw_names = cfg.get("switches") or []
+        sw_name = sw_names[idx] if (isinstance(sw_names, list) and idx < len(sw_names) and sw_names[idx]) \
+            else "スイッチ%d" % (idx + 1)
         entry = {
             "ts": int(ts),
             "iso": iso(ts),
@@ -218,7 +224,11 @@ def run_serial(setting, dev):
                     raw, buf = buf.split(b"\n", 1)
                     line = raw.decode("utf-8", "replace").strip()
                     if line:
-                        handle_line(line, setting, dev, lambda s: ser.write((s + "\n").encode()))
+                        # 1行の処理で落ちても daemon は死なない（v2.3 初日クラッシュの教訓）
+                        try:
+                            handle_line(line, setting, dev, lambda s: ser.write((s + "\n").encode()))
+                        except Exception as e:
+                            log("行処理エラー(無視):", repr(e), "| line:", line)
 
             # リンク死活（HB/T が途絶えたら張り直し）
             if dev.last_seen is not None and now - dev.last_seen > LINK_STALE_SEC:
