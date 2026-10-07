@@ -13,7 +13,13 @@
 - [ ] 実機配線（マイクロスイッチ: COM→GND / NO→D4 のみ・INPUT_PULLUP）と書き込み検証（開発ポート212101）。**接続時に `rm ~/.cache/yocron/disabled/meds-daemon ~/.cache/yocron/disabled/meds-check` でジョブ有効化**
 - [ ] E2E実証: 薬ケース実機で旧BLE版と並行運用→安定後、XIAO BLE Sense を取り外して fastrec 予備へ
 - [ ] `/parts/` で Pro Micro −1 の消費記録（スイッチはタクト/リミットスイッチの手持ちから・消したら記録）
-- [ ] 運用固定ポートが決まったら `~/dev/Arduino/AGENTS.md` §8 シリアルポート対応表へ登録
+- [ ] **移設: 開発ポート212101 → 固定ポートへ**（ユーザーがUSB刺し替え・タイミングはユーザー判断。212101は開発共通ポートとして温存・§8）。刺し替え後の作業チェックリスト:
+  1. 新ポート確認: `ls /dev/cu.usbmodem*`（ATmega32U4 CDC は usbmodem に出る・差す物理ポートで番号が変わる）
+  2. `meds-daemon/setting.json` の serial_port を新ポートへ（**daemon は起動時にしか読まないので要再起動**: `yocron.py stop meds-daemon && yocron.py run meds-daemon`）
+  3. `medicine_case_promicro/setting.sh` も新ポートへ更新（旧設定のままだと 212101 の別実験ボードへ誤書込する）
+  4. `~/dev/Arduino/AGENTS.md` §8 表へ新ポート登録（常用固定・実験流用書込=禁止）
+  5. `medicine_case_promicro/common.sh` の固定ポート拒否リストにも新ポートを追加（自前完結型の防御）
+  6. ファームの再書込は不要（設定はEEPROM入り・挿し替えだけで daemon が再接続する）
 
 ### Phase 2: 複数台対応（Phase 1 が安定稼働してから着手）
 
