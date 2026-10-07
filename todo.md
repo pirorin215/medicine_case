@@ -21,7 +21,16 @@
   5. `medicine_case_promicro/common.sh` の固定ポート拒否リストにも新ポートを追加（自前完結型の防御）
   6. ファームの再書込は不要（設定はEEPROM入り・挿し替えだけで daemon が再接続する）
 
-### Phase 2: 複数台対応（Phase 1 が安定稼働してから着手）
+### Phase 2: 同一デバイス複数スイッチ対応（2026-10-07 ユーザー提案・実装要否はユーザー判断）
+
+- [ ] ファーム: SWITCH_PINS = {D4, D5, D6, D7, D8, D9}（最大6本・INPUT_PULLUP・GND共有）・`INTAKE <idx> <age_ms>` に拡張（v2.3・押下LED点滅は全スイッチ共通）
+- [ ] daemon: 二重受信 dedup をスイッチ単位に変更・スイッチ名は config.json の `switches: {idx: 名前}` で Mac 側管理（EEPROM に焼かない＝名前変更にファーム不要）
+- [ ] ポータル: 設定にスイッチ名一覧（idx→名前）を追加・history/ntfy に switch_name を反映
+- [ ] v2.2 互換: `INTAKE <age>`（idx 省略形）は daemon だけ idx=0 として受ける
+- [ ] メリット: 用途が増えても USB 1ポートで済む → ポート追加も複数台化（Phase 3）も当面不要になる
+- [ ] 実装するならデバイスが手元にある今のうちに（マウント後の再書込は面倒・8秒窓）
+
+### Phase 3: 複数台対応（複数USBデバイス・必要性は Phase 2 で消える可能性大）
 
 - [ ] daemon: ポート→デバイス名のレジストリ（daemon 設定に複数 Pro Micro の固定ポートを列挙・HELLO の名前と突合）
 - [ ] history/status をデバイス名単位に分離（history.jsonl には Phase 1 から device フィールド入りなので拡張は読み側）
