@@ -13,22 +13,16 @@
 - [ ] 実機配線（マイクロスイッチ: COM→GND / NO→D4 のみ・INPUT_PULLUP）と書き込み検証（開発ポート212101）。**接続時に `rm ~/.cache/yocron/disabled/meds-daemon ~/.cache/yocron/disabled/meds-check` でジョブ有効化**
 - [ ] E2E実証: 薬ケース実機で旧BLE版と並行運用→安定後、XIAO BLE Sense を取り外して fastrec 予備へ
 - [ ] `/parts/` で Pro Micro −1 の消費記録（スイッチはタクト/リミットスイッチの手持ちから・消したら記録）
-- [ ] **移設: 開発ポート212101 → 固定ポートへ**（ユーザーがUSB刺し替え・タイミングはユーザー判断。212101は開発共通ポートとして温存・§8）。刺し替え後の作業チェックリスト:
-  1. 新ポート確認: `ls /dev/cu.usbmodem*`（ATmega32U4 CDC は usbmodem に出る・差す物理ポートで番号が変わる）
-  2. `meds-daemon/setting.json` の serial_port を新ポートへ（**daemon は起動時にしか読まないので要再起動**: `yocron.py stop meds-daemon && yocron.py run meds-daemon`）
-  3. `medicine_case_promicro/setting.sh` も新ポートへ更新（旧設定のままだと 212101 の別実験ボードへ誤書込する）
-  4. `~/dev/Arduino/AGENTS.md` §8 表へ新ポート登録（常用固定・実験流用書込=禁止）
-  5. `medicine_case_promicro/common.sh` の固定ポート拒否リストにも新ポートを追加（自前完結型の防御）
-  6. ファームの再書込は不要（設定はEEPROM入り・挿し替えだけで daemon が再接続する）
+- [x] **移設完了: `/dev/cu.usbmodem212401`（2026-10-07・ユーザーが移設・setting.sh更新済み）** — daemon setting.json 更新＋再起動でオンライン確認済み・§8 表へ「常用固定・実験流用書込禁止」で登録済み。自プロジェクトの upload.sh は自ポートへの書込が正当なので common.sh blocklist には入れない（他プロジェクトは §8 宣言で守る）
 
-### Phase 2: 同一デバイス複数スイッチ対応（2026-10-07 ユーザー提案・実装要否はユーザー判断）
+### Phase 2: 同一デバイス複数スイッチ対応（2026-10-07 ユーザー提案・同日実装）
 
-- [ ] ファーム: SWITCH_PINS = {D4, D5, D6, D7, D8, D9}（最大6本・INPUT_PULLUP・GND共有）・`INTAKE <idx> <age_ms>` に拡張（v2.3・押下LED点滅は全スイッチ共通）
-- [ ] daemon: 二重受信 dedup をスイッチ単位に変更・スイッチ名は config.json の `switches: {idx: 名前}` で Mac 側管理（EEPROM に焼かない＝名前変更にファーム不要）
-- [ ] ポータル: 設定にスイッチ名一覧（idx→名前）を追加・history/ntfy に switch_name を反映
-- [ ] v2.2 互換: `INTAKE <age>`（idx 省略形）は daemon だけ idx=0 として受ける
-- [ ] メリット: 用途が増えても USB 1ポートで済む → ポート追加も複数台化（Phase 3）も当面不要になる
-- [ ] 実装するならデバイスが手元にある今のうちに（マウント後の再書込は面倒・8秒窓）
+- [x] ファーム v2.3: SWITCH_PINS = {D4, D5, D6, D7, D8, D9}（最大6本・INPUT_PULLUP・GND共有）・`INTAKE <idx> <age_ms>`・押下LED点滅は全スイッチ共通（ビルド合格）
+- [x] daemon: dedup をスイッチ単位に変更・スイッチ名は config.json の `switches: {idx: 名前}` で Mac 側管理（EEPROM に焼かない＝名前変更にファーム不要）・v2.2 互換（`INTAKE <age>` は idx=0 扱い）
+- [x] ポータル: 設定にスイッチ名一覧（D4-D9→名前）を追加・history/ntfy に switch_name を反映
+- [ ] **v2.3 を実機へ書き込む**（`sh upload.sh`・setting.sh は 212401 済み）→ D5/D6 押下で ntfy・履歴を確認
+- [ ] スイッチ名の初期値は「スイッチ1/2/3」— ポータル⚙設定で好きな名前に変える
+- メリット: 用途が増えても USB 1ポートで済む → ポート追加も複数台化（Phase 3）も当面不要になる
 
 ### Phase 3: 複数台対応（複数USBデバイス・必要性は Phase 2 で消える可能性大）
 

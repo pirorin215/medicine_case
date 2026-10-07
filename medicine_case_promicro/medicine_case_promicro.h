@@ -8,16 +8,19 @@
 // ファームウェアバージョン（コード変更時は PATCH を bump すること・機構変更は MINOR）
 //=============================================================================
 #define FIRMWARE_VERSION_MAJOR 2
-#define FIRMWARE_VERSION_MINOR 2
+#define FIRMWARE_VERSION_MINOR 3
 #define FIRMWARE_VERSION_PATCH 0
 
 //=============================================================================
-// マイクロスイッチ（服薬ボタン）
+// マイクロスイッチ（服薬ボタン・複数対応）
 //=============================================================================
-// COM -> GND / NO -> D4 の1極接続。INPUT_PULLUP で押すと LOW。
-#define SWITCH_PIN 4
+// COM -> GND / NO -> GPIO の1極接続。INPUT_PULLUP で押すと LOW。
+// idx は配列順（D4=0, D5=1, D6=2, D7=3, D8=4, D9=5）。未配線のピンは放置でよい。
+// スイッチ名はファームでは持たない（Mac 側 config.json の switches で管理）。
+#define SWITCH_PINS {4, 5, 6, 7, 8, 9}
+#define SWITCH_COUNT 6
 #define SWITCH_DEBOUNCE_MS       30    // チャタリング除去 [ms]
-#define SWITCH_MIN_INTERVAL_MS   2000  // 連打による二重記録の防止 [ms]
+#define SWITCH_MIN_INTERVAL_MS   2000  // 同一スイッチ連打による二重記録の防止 [ms]
 
 //=============================================================================
 // オンボードLED点滅（押下フィードバック）
@@ -56,6 +59,7 @@ extern unsigned long g_currentMillis;
 
 // 未送信の検知（daemon 未接続中に押された分・再接続時に1回だけ再送）
 extern bool g_intakePending;
+extern uint8_t g_intakePendingIdx;
 extern unsigned long g_intakePendingAt;
 
 //=============================================================================
@@ -75,6 +79,6 @@ void blinkStart();
 
 // medicine_case_promicro_serial.ino
 void serialPoll();
-void serialSendIntake();
+void serialSendIntake(uint8_t idx);
 
 #endif // MEDICINE_CASE_PROMICRO_H

@@ -14,7 +14,8 @@
  *     HELLO medcase <name> v<x.y.z>    接続確立時（再接続時も再送）
  *     CONFIG name=<name> v=<x.y.z>     HELLO 直後
  *     HB <uptime_s>                    60秒ごとの心拍
- *     INTAKE <age_ms>                  押下時（age_ms>0 は daemon 停止中押下の再送）
+ *     INTAKE <idx> <age_ms>            押下時（idx は SWITCH_PINS の配列順・0始まり。
+ *                                      age_ms>0 は daemon 停止中押下の再送）
  *   host -> MCU:
  *     PING                             -> PONG
  *     GET:config                       -> CONFIG ...
@@ -33,6 +34,7 @@ DeviceConfig g_cfg;
 unsigned long g_currentMillis = 0;
 
 bool g_intakePending = false;
+uint8_t g_intakePendingIdx = 0;
 unsigned long g_intakePendingAt = 0;
 
 //=============================================================================

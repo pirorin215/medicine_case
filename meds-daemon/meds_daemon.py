@@ -38,6 +38,8 @@ DEFAULT_CONFIG = {
         {"name": "夜", "time": "22:00", "enabled": True},
     ],
     "remind": {"repeat_min": 30, "window_min": 120},
+    # スイッチ名は Mac 側で管理（idx は D4=0, D5=1, ... D9=5・未配線は無視される）
+    "switches": {"0": "スイッチ1", "1": "スイッチ2", "2": "スイッチ3"},
 }
 
 # HB がこの秒数途絶えたら接続を張り直し（デバイスは60秒HB・待機中は送信なし）
@@ -98,21 +100,6 @@ def send_ntfy(setting, title, body, high=False):
         log("ntfyタイムアウト")
 
 
-def slot_for_ts(slots, ts):
-    """時刻帯の枠名。当日の最後の「枠開始 <= t」の枠。どの枠より前なら None。"""
-    t = datetime.fromtimestamp(ts)
-    best = None
-    for s in slots:
-        try:
-            h, m = s["time"].split(":")
-        except (KeyError, ValueError):
-            continue
-        slot_dt = t.replace(hour=int(h), minute=int(m), second=0, microsecond=0)
-        if slot_dt <= t:
-            best = s
-    return best["name"] if best else None
-
-
 class DeviceState:
     """MCU から観測した状態（status.json の device セクション）"""
 
@@ -120,7 +107,7 @@ class DeviceState:
         self.name = None
         self.fw = None
         self.last_seen = None
-        self.last_intake_ts = None
+        self.last_intake_by_switch = {}   # idx -> ts（dedup と status 表示に使用）
         self.offline_alerted = False
 
     def as_dict(self, setting, connected):
@@ -132,7 +119,7 @@ class DeviceState:
             "connected": connected,
             "online": online,
             "last_seen": iso(self.last_seen) if self.last_seen else None,
-            "last_intake_ts": self.last_intake_ts,
+            "last_intake_ts": max(self.last_intake_by_switch.values()) if self.last_intake_by_switch else None,
             "serial_port": setting["serial_port"],
         }
 
@@ -169,32 +156,38 @@ def handle_line(line, setting, dev, write_line):
         dev.last_seen = time.time()
 
     elif tag == "INTAKE":
-        # INTAKE <age_ms>
+        # INTAKE <idx> <age_ms>（v2.2 互換: INTAKE <age> は idx=0 扱い）
         dev.last_seen = time.time()
         try:
-            age_ms = int(parts[1])
+            if len(parts) >= 3:
+                idx = int(parts[1])
+                age_ms = int(parts[2])
+            else:
+                idx = 0
+                age_ms = int(parts[1])
         except (IndexError, ValueError):
             return
         ts = time.time() - age_ms / 1000.0
 
-        # 軽い二重受信 insurance（5秒以内の重複は無視）
-        if dev.last_intake_ts is not None and abs(ts - dev.last_intake_ts) < 5:
+        # 二重受信 insurance（同一スイッチ・5秒以内は無視・別スイッチは有効）
+        last = dev.last_intake_by_switch.get(idx)
+        if last is not None and abs(ts - last) < 5:
             return
-        dev.last_intake_ts = ts
+        dev.last_intake_by_switch[idx] = ts
 
         cfg = load_config()
+        sw_name = cfg.get("switches", {}).get(str(idx)) or "スイッチ%d" % (idx + 1)
         entry = {
             "ts": int(ts),
             "iso": iso(ts),
             "device": dev.name or "unknown",
+            "switch": idx,
+            "switch_name": sw_name,
             "source": "switch",
         }
         append_history(entry)
-        slot = slot_for_ts(cfg.get("slots", []), ts)
-        slot_label = slot + "枠" if slot else ""
-        title = "💊 服薬を記録 %s%s" % (
-            datetime.fromtimestamp(ts).strftime("%H:%M"), ("・" + slot_label) if slot else "")
-        body = "%s ボタン操作 %s" % (entry["device"], entry["iso"])
+        title = "💊 %sを記録 %s" % (sw_name, datetime.fromtimestamp(ts).strftime("%H:%M"))
+        body = "%s %s %s" % (entry["device"], sw_name, entry["iso"])
         send_ntfy(setting, title, body)
         log("INTAKE記録:", entry)
 

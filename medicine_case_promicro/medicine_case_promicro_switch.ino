@@ -1,11 +1,11 @@
 /**
- * マイクロスイッチ入力 + オンボードLED点滅
+ * マイクロスイッチ入力（複数対応）+ オンボードLED点滅
  *
- * スイッチ: COM -> GND / NO -> D4。INPUT_PULLUP で押すと LOW。
- *   30ms のチャタリング除去後の立ち下がり（押し込み確定）で1回だけ発火。
- *   2秒以内の連打は二重記録防止のため無視（daemon 側にも5秒dedupあり）。
+ * スイッチ: COM -> GND / NO -> GPIO（D4-D9・GND は共有）。INPUT_PULLUP で押すと LOW。
+ *   各スイッチ独立に 30ms のチャタリング除去 → 立ち下がり（押し込み確定）で1回だけ発火。
+ *   同一スイッチの 2秒以内の連打は二重記録防止で無視（別スイッチの同時押下は有効）。
  *
- * LED: 押されたら RX/TX オンボードLEDを約1.5秒間点滅（ノンブロッキング）。
+ * LED: 押されたら RX/TX オンボードLEDを約1.5秒間点滅（ノンブロッキング・全スイッチ共通）。
  *   ポリティは active-low（RXLED0/TXLED0 が点灯）。実機で逆に見えたら
  *   LED_ON/LED_OFF のマクロ内を入れ替えるだけでよい。
  */
@@ -17,38 +17,48 @@
 #define LED_OFF() do { RXLED1; TXLED1; } while (0)
 
 //=============================================================================
-// スイッチ入力
+// スイッチ入力（スイッチごとに独立したデバウンス状態）
 //=============================================================================
-static uint8_t s_stable = HIGH;            // 直近の安定値
-static uint8_t s_lastRaw = HIGH;
-static unsigned long s_lastRawChange = 0;
-static unsigned long s_lastEvent = 0;
+static const uint8_t SWITCH_PIN_LIST[SWITCH_COUNT] = SWITCH_PINS;
+
+static uint8_t s_stable[SWITCH_COUNT];            // 直近の安定値
+static uint8_t s_lastRaw[SWITCH_COUNT];
+static unsigned long s_lastRawChange[SWITCH_COUNT];
+static unsigned long s_lastEvent[SWITCH_COUNT];
 
 void setupSwitch() {
-    pinMode(SWITCH_PIN, INPUT_PULLUP);
+    for (uint8_t i = 0; i < SWITCH_COUNT; i++) {
+        pinMode(SWITCH_PIN_LIST[i], INPUT_PULLUP);
+        s_stable[i] = HIGH;
+        s_lastRaw[i] = HIGH;
+        s_lastRawChange[i] = 0;
+        s_lastEvent[i] = 0;
+    }
     LED_OFF();
 }
 
-static void onPress() {
-    if (s_lastEvent != 0 && g_currentMillis - s_lastEvent < SWITCH_MIN_INTERVAL_MS) {
-        logInfo("SW", F("press ignored (too soon)"));
+static void onPress(uint8_t idx) {
+    if (s_lastEvent[idx] != 0 && g_currentMillis - s_lastEvent[idx] < SWITCH_MIN_INTERVAL_MS) {
+        logInfo("SW", String(F("press ignored (idx=")) + idx + F(" too soon)"));
         return;
     }
-    s_lastEvent = g_currentMillis;
-    logInfo("SW", F("Medicine intake (switch pressed)"));
-    serialSendIntake();
+    s_lastEvent[idx] = g_currentMillis;
+    logInfo("SW", String(F("Medicine intake (switch idx=")) + idx + F(" pressed)"));
+    serialSendIntake(idx);
     blinkStart();
 }
 
 void pollSwitch() {
-    uint8_t raw = digitalRead(SWITCH_PIN);
-    if (raw != s_lastRaw) {
-        s_lastRaw = raw;
-        s_lastRawChange = g_currentMillis;
-    } else if (raw != s_stable && (g_currentMillis - s_lastRawChange) >= SWITCH_DEBOUNCE_MS) {
-        s_stable = raw;
-        if (s_stable == LOW) {
-            onPress();
+    for (uint8_t i = 0; i < SWITCH_COUNT; i++) {
+        uint8_t raw = digitalRead(SWITCH_PIN_LIST[i]);
+        if (raw != s_lastRaw[i]) {
+            s_lastRaw[i] = raw;
+            s_lastRawChange[i] = g_currentMillis;
+        } else if (raw != s_stable[i] && (g_currentMillis - s_lastRawChange[i]) >= SWITCH_DEBOUNCE_MS) {
+            s_stable[i] = raw;
+            if (s_stable[i] == LOW) {
+                onPress(i);
+            }
         }
     }
 }

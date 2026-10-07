@@ -36,14 +36,17 @@ static void sendHello() {
 //=============================================================================
 // INTAKE 送出（スイッチ押下時と再接続再送の両方から使う）
 //=============================================================================
-void serialSendIntake() {
+void serialSendIntake(uint8_t idx) {
     if (Serial) {
-        Serial.print(F("INTAKE 0"));
+        Serial.print(F("INTAKE "));
+        Serial.print(idx);
+        Serial.print(F(" 0"));
         Serial.println();
         g_intakePending = false;
     } else {
         // daemon 未接続: 保持して再接続時に再送
         g_intakePending = true;
+        g_intakePendingIdx = idx;
         g_intakePendingAt = g_currentMillis;
         logInfo("SER", F("intake kept as pending (daemon offline)"));
     }
@@ -90,9 +93,12 @@ void serialPoll() {
         if (g_intakePending) {
             unsigned long age = millis() - g_intakePendingAt;
             Serial.print(F("INTAKE "));
+            Serial.print(g_intakePendingIdx);
+            Serial.print(' ');
             Serial.println(age);
             g_intakePending = false;
-            logInfo("SER", String(F("pending intake resent (age=")) + String(age) + F("ms)"));
+            logInfo("SER", String(F("pending intake resent (idx=")) + g_intakePendingIdx +
+                    F(" age=") + String(age) + F("ms)"));
         }
         s_lastHb = g_currentMillis;
     }
