@@ -1,0 +1,6 @@
+build/
+setting.sh
+.DS_Store
+*.swp
+*.swo
+*~

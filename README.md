@@ -7,15 +7,21 @@
 ```
 medicine_case/
 ├── README.md                   # プロジェクト概要（本ファイル）
+├── todo.md                     # 残課題（Phase 1: USB直結版構築 / Phase 2: 複数台対応）
 ├── docs/                       # システム仕様書
 │   └── SYSTEM_SPEC.md          # システム全体の仕様
-├── medicine_case/              # マイコン用ファームウェア (Arduino/PlatformIO)
+├── medicine_case/              # BLE版ファームウェア (XIAO BLE Sense・現行運用)
 │   ├── README.md               # ファームウェア概要
 │   └── PROTOCOL_SPEC.md        # BLE通信プロトコル仕様
-│
-└── MedicineCaseMob/            # スマートフォンアプリ (Android)
-    └── README.md               # アプリ概要
+├── medicine_case_promicro/     # USB直結版ファームウェア (Pro Micro + GY-BMI160)
+│   └── README.md               # 配線・シリアルプロトコル仕様
+├── meds-daemon/                # Mac側 daemon (USBシリアル受信・記録・ntfy・リマインド)
+│   └── README.md               # 構成・セットアップ
+└── MedicineCaseMob/            # BLE版スマホアプリ (Android・USB版では不使用)
 ```
+
+USB直結版はスマホアプリの代わりにポータル `/meds/` が設定・履歴UIを担う
+（データの正は `~/www-portal/data/meds/`）。詳細は todo.md と各 README を参照。
 
 ## システム概要
 
