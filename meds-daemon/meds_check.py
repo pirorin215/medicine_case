@@ -2,21 +2,24 @@
 """
 meds_check — 飲み忘れリマインド（yocron every 5m で実行）
 
-config.json の各枠について「予定時刻を過ぎたのに history.jsonl に服用記録が無ければ」
-ntfy でリマインドする。枠の window_min を過ぎたら諦めて次の枠へ。
-再通知は repeat_min 間隔。状態は remind-state.json に置き、二重通知を防ぐ。
+スケジュールモデルはスマホアプリ(MedicineCaseMob)準拠（docs/SYSTEM_SPEC.md §3）:
 
-服用の枠帰属: 当日の枠を順に見て、[枠開始-240分, 枠開始+window_min) に記録された
-未使用の服用をその枠の分として数える（予定時刻前に飲んでも吸收）。
+- 枠: 朝/昼/夜（開始/終了・連動・有効トグル）。服用の帰属は時刻ベース判定
+  （押下時刻が [start, end) に属する枠・活動時間外の押下はどの枠にも帰属しない）
+- 攻め（推奨時刻通知）: 推奨時刻（最大3つ・枠とは独立）に到達し、その推奨時刻が
+  有効枠の時間帯内で、その枠が未服用なら通知。推奨時刻ごとに1日1回
+- 守り（追い通知）: 終了時刻を過ぎた有効枠のうち最も遅い1枠のみ対象（直近枠ルール）。
+  未服用なら初回は即通知、以後 remind.interval_min ごとに再通知。
+  枠終了後の押下でも服用済み扱いにして通知を止める（寛容側）
 
-テスト: MEDS_FAKE_TIME=2026-10-08T08:35 のように「今」を差し替えられる
-（タイトルに (テスト) が付く）。gomi の GOMI_FAKE_TODAY と同じ方式。
+状態は remind-state.json に置き、二重通知を防ぐ。
+テスト: MEDS_FAKE_TIME=YYYY-MM-DDTHH:MM で「今」を差し替え（タイトルに (テスト) が付く）。
 """
 
 import json
 import os
 import subprocess
-from datetime import datetime, timedelta, date as date_cls
+from datetime import datetime, timedelta
 
 HOME = os.path.expanduser("~")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -28,15 +31,14 @@ STATE_PATH = os.path.join(DATA_DIR, "remind-state.json")
 
 DEFAULT_CONFIG = {
     "slots": [
-        {"name": "朝", "time": "08:00", "enabled": True},
-        {"name": "昼", "time": "12:30", "enabled": True},
-        {"name": "夜", "time": "22:00", "enabled": True},
+        {"name": "朝", "start": "07:00", "end": "11:00", "enabled": True},
+        {"name": "昼", "start": "11:00", "end": "17:00", "enabled": True},
+        {"name": "夜", "start": "17:00", "end": "23:00", "enabled": True},
     ],
-    "remind": {"repeat_min": 30, "window_min": 120},
+    "recommend": ["09:00", "13:00", "20:00"],
+    "remind": {"interval_min": 60},
+    "switches": ["スイッチ1", "スイッチ2", "スイッチ3", "", "", ""],
 }
-
-# 枠開始の何分前までの服用をその枠に数えるか
-GRACE_BEFORE_MIN = 240
 
 
 def log(*args):
@@ -64,6 +66,16 @@ def load_config():
     for k in merged:
         if k in user:
             merged[k] = user[k]
+    # 形状ガイド（旧形式・配置ミスで daemon/check が死なないように）
+    if not isinstance(merged["slots"], list) or not merged["slots"] or \
+            "start" not in (merged["slots"][0] or {}):
+        merged["slots"] = json.loads(json.dumps(DEFAULT_CONFIG["slots"]))
+    if not isinstance(merged.get("recommend"), list):
+        merged["recommend"] = list(DEFAULT_CONFIG["recommend"])
+    if not isinstance(merged.get("remind"), dict) or "interval_min" not in merged.get("remind", {}):
+        merged["remind"] = dict(DEFAULT_CONFIG["remind"])
+    if not isinstance(merged.get("switches"), list):
+        merged["switches"] = list(DEFAULT_CONFIG["switches"])
     return merged
 
 
@@ -83,7 +95,6 @@ def send_ntfy(setting, title, body, high=False):
 
 
 def todays_intakes(today):
-    """history.jsonl から当日の服用 ts 一覧を返す"""
     out = []
     try:
         with open(HISTORY_PATH) as f:
@@ -102,71 +113,93 @@ def todays_intakes(today):
     return sorted(out)
 
 
+def dt_at(today, hhmm):
+    h, m = hhmm.split(":")
+    return datetime.combine(today, datetime.min.time()).replace(hour=int(h), minute=int(m))
+
+
+def slot_of(slots, t, today):
+    """時刻 t が [start,end) に属する最初の有効枠。無ければ None（活動時間外）"""
+    for s in slots:
+        if not s.get("enabled", True):
+            continue
+        if dt_at(today, s["start"]) <= t < dt_at(today, s["end"]):
+            return s
+    return None
+
+
+def slot_taken_ts(intakes, s, today):
+    """枠 [start,end) 内の最初の服用 ts。無ければ None"""
+    a = dt_at(today, s["start"]).timestamp()
+    b = dt_at(today, s["end"]).timestamp()
+    for ts in intakes:
+        if a <= ts < b:
+            return ts
+    return None
+
+
 def main():
     setting = load_json(SETTING_PATH, {"ntfy_url": "https://ntfy.sh/claude-code-notice215"})
     cfg = load_config()
     n = now()
     today = n.date()
     fake = bool(os.environ.get("MEDS_FAKE_TIME"))
+    tag = " (テスト)" if fake else ""
 
-    # 履歴の枠帰属（枠順に未使用の服用を割り当て）
-    intakes = list(todays_intakes(today))
-    used = [False] * len(intakes)
-    repeat_min = int(cfg.get("remind", {}).get("repeat_min", 30))
-    window_min = int(cfg.get("remind", {}).get("window_min", 120))
+    intakes = todays_intakes(today)
+    interval = int(cfg["remind"].get("interval_min", 60))
 
     state = load_json(STATE_PATH, {})
     if state.get("date") != today.isoformat():
-        state = {"date": today.isoformat(), "slots": {}}
+        state = {"date": today.isoformat(), "rec": {}, "slots": {}}
+    rec_state = state.setdefault("rec", {})
     slots_state = state.setdefault("slots", {})
 
-    for slot in cfg.get("slots", []):
-        name = slot.get("name", "?")
-        if not slot.get("enabled", True):
+    # ---- 攻め: 推奨時刻通知（推奨時刻ごとに1日1回・有効枠内のみ）----
+    for i, rec in enumerate(cfg["recommend"][:3]):
+        rec_dt = dt_at(today, rec)
+        slot = slot_of(cfg["slots"], rec_dt, today)
+        if slot is None:
+            continue   # 有効枠の範囲外に設定された推奨時刻は無視
+        if rec_state.get(str(i), {}).get("notified"):
             continue
-        try:
-            h, m = slot["time"].split(":")
-            slot_dt = datetime.combine(today, datetime.min.time()).replace(hour=int(h), minute=int(m))
-        except (KeyError, ValueError):
-            log("枠の時刻不正:", slot)
+        if n < rec_dt:
             continue
-
-        window_end = slot_dt + timedelta(minutes=window_min)
-        grace_start = slot_dt - timedelta(minutes=GRACE_BEFORE_MIN)
-
-        taken = False
-        for i, ts in enumerate(intakes):
-            t = datetime.fromtimestamp(ts)
-            if not used[i] and grace_start <= t < window_end:
-                used[i] = True
-                taken = True
-                break
-
-        if taken:
-            slots_state.pop(name, None)
-            continue
-
-        if not (slot_dt <= n < window_end):
-            # まだ枠前 or 枠終了済み（終了済みは諦め）
-            continue
-
-        st = slots_state.get(name, {})
-        last_sent = st.get("last_sent")
-        count = int(st.get("count", 0))
-        if last_sent:
-            last_dt = datetime.fromisoformat(last_sent)
-            if (n - last_dt) < timedelta(minutes=repeat_min):
-                continue
-
-        title = "💊 %sの薬を飲んでいません%s" % (name, " (テスト)" if fake else "")
-        body = "%s 枠（〜%s）。飲んだら薬ケースを傾けて記録してください。" % (
-            slot["time"], window_end.strftime("%H:%M"))
+        if slot_taken_ts(intakes, slot, today) is not None:
+            continue   # 服用済みなら通知もフラグも不要
+        title = "💊 推奨時刻です%s: %sの薬はまだ記録がありません" % (tag, slot["name"])
+        body = "%s（推奨 %s・枠 %s-%s）。飲んだらスイッチを押してください。" % (
+            slot["name"], rec, slot["start"], slot["end"])
         send_ntfy(setting, title, body, high=True)
-        log("リマインド送信:", name, "count=%d" % (count + 1))
-        slots_state[name] = {
-            "last_sent": n.isoformat(timespec="seconds"),
-            "count": count + 1,
-        }
+        rec_state[str(i)] = {"notified": n.isoformat(timespec="seconds"), "slot": slot["name"]}
+        log("推奨時刻通知:", slot["name"], rec)
+
+    # ---- 守り: 追い通知（直近枠ルール: 終了を過ぎた有効枠のうち最も遅い1枠のみ）----
+    ended = [s for s in cfg["slots"] if s.get("enabled", True) and dt_at(today, s["end"]) <= n]
+    target = max(ended, key=lambda s: dt_at(today, s["end"])) if ended else None
+    for s in cfg["slots"]:
+        if target is None or s["name"] != target["name"]:
+            slots_state.pop(s["name"], None)   # 対象外になった枠の通知状態を掃除
+    if target is not None:
+        a = dt_at(today, target["start"]).timestamp()
+        # 服用済み判定は寛容側: 枠内は厳密、枠終了後の押下でも「飲んだ」扱いにして通知を止める
+        taken = any(ts >= a for ts in intakes)
+        if taken:
+            slots_state.pop(target["name"], None)
+        else:
+            st = slots_state.get(target["name"], {})
+            last_sent = st.get("last_sent")
+            if last_sent:
+                due = (n - datetime.fromisoformat(last_sent)) >= timedelta(minutes=interval)
+            else:
+                due = True   # 初回はインターバル制限を無視して即通知
+            if due:
+                title = "💊 %sの薬を飲んでいません%s" % (target["name"], tag)
+                body = "枠 %s-%s を過ぎました。%d分間隔で再通知します。" % (
+                    target["start"], target["end"], interval)
+                send_ntfy(setting, title, body, high=True)
+                slots_state[target["name"]] = {"last_sent": n.isoformat(timespec="seconds")}
+                log("追い通知:", target["name"], "count=", st.get("count", 0) + 1)
 
     tmp = STATE_PATH + ".tmp"
     with open(tmp, "w") as f:
