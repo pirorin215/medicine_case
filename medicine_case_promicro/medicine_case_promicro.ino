@@ -13,14 +13,17 @@
  *   MCU -> host:
  *     HELLO medcase <name> v<x.y.z>    接続確立時（再接続時も再送）
  *     CONFIG name=<name> v=<x.y.z>     HELLO 直後
- *     HB <uptime_s>                    5秒ごとの心拍
- *     T <state>                        1秒ごとのテレメトリ（state: IDLE/BLINK）
+ *     HB <uptime_s>                    60秒ごとの心拍
  *     INTAKE <age_ms>                  押下時（age_ms>0 は daemon 停止中押下の再送）
  *   host -> MCU:
  *     PING                             -> PONG
  *     GET:config                       -> CONFIG ...
  *     SET:name:<name>                  -> OK:name:<name>               (1-15文字)
  *     不明コマンド                      -> ERR:unknown
+ *
+ * 待機中は送信しない（v2.2）。TX LED はコアの CDC が Serial.write 毎に
+ * パルスするため、1秒テレメトリがあると待機中も1Hzで点滅してウザい。
+ * liveness は 60秒HB で足りる（daemon の stale 判定は 90秒）。
  */
 
 #include "medicine_case_promicro.h"
@@ -28,7 +31,6 @@
 // --- グローバル変数 ---
 DeviceConfig g_cfg;
 unsigned long g_currentMillis = 0;
-uint8_t g_mcuState = MCU_STATE_IDLE;
 
 bool g_intakePending = false;
 unsigned long g_intakePendingAt = 0;
@@ -59,13 +61,6 @@ const char* firmwareVersion() {
     snprintf(buf, sizeof(buf), "%d.%d.%d",
              FIRMWARE_VERSION_MAJOR, FIRMWARE_VERSION_MINOR, FIRMWARE_VERSION_PATCH);
     return buf;
-}
-
-const char* mcuStateName(uint8_t s) {
-    switch (s) {
-        case MCU_STATE_BLINK: return "BLINK";
-        default:              return "IDLE";
-    }
 }
 
 void logInfo(const char* tag, const String& msg) {

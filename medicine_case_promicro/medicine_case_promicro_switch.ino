@@ -66,7 +66,6 @@ void blinkStart() {
     s_blinkCount = 0;
     s_ledOn = false;
     s_blinkLast = g_currentMillis;
-    g_mcuState = MCU_STATE_BLINK;
 }
 
 void updateBlink() {
@@ -82,7 +81,6 @@ void updateBlink() {
         s_blinkCount++;
         if (s_blinkCount >= LED_BLINK_COUNT) {
             s_blinkActive = false;
-            g_mcuState = MCU_STATE_IDLE;
         }
     } else {
         LED_ON();

@@ -31,7 +31,7 @@ cp setting.json.example setting.json   # serial_port を実機のポートに（
 | ファイル | 正 | 内容 |
 |---|---|---|
 | config.json | ポータル api.php | slots（朝/昼/夜の時刻+有効）・remind（再通知/枠長） |
-| status.json | daemon | daemon 状態・デバイス online/角度/状態/最終心拍 |
+| status.json | daemon | daemon 状態・デバイス online/最終応答/最終服用 |
 | history.jsonl | daemon | 服薬イベント追記ログ `{ts, iso, device, max_change, source}` |
 | remind-state.json | meds_check | 当日のリマインド送信履歴（二重通知防止） |
 

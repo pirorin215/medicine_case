@@ -40,8 +40,8 @@ DEFAULT_CONFIG = {
     "remind": {"repeat_min": 30, "window_min": 120},
 }
 
-# HB/T がこの秒数途絶えたら接続を張り直す
-LINK_STALE_SEC = 30
+# HB がこの秒数途絶えたら接続を張り直し（デバイスは60秒HB・待機中は送信なし）
+LINK_STALE_SEC = 90
 
 
 def log(*args):
@@ -119,7 +119,6 @@ class DeviceState:
     def __init__(self):
         self.name = None
         self.fw = None
-        self.state = None
         self.last_seen = None
         self.last_intake_ts = None
         self.offline_alerted = False
@@ -133,7 +132,6 @@ class DeviceState:
             "connected": connected,
             "online": online,
             "last_seen": iso(self.last_seen) if self.last_seen else None,
-            "state": self.state,
             "last_intake_ts": self.last_intake_ts,
             "serial_port": setting["serial_port"],
         }
@@ -169,11 +167,6 @@ def handle_line(line, setting, dev, write_line):
 
     elif tag == "HB":
         dev.last_seen = time.time()
-
-    elif tag == "T":
-        dev.last_seen = time.time()
-        if len(parts) > 1:
-            dev.state = parts[1]
 
     elif tag == "INTAKE":
         # INTAKE <age_ms>

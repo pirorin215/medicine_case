@@ -14,7 +14,6 @@ static bool s_wasConnected = false;
 static char s_lineBuf[64];
 static uint8_t s_lineLen = 0;
 static unsigned long s_lastHb = 0;
-static unsigned long s_lastTelemetry = 0;
 
 //=============================================================================
 // 送信ヘルパ
@@ -32,11 +31,6 @@ static void sendHello() {
     Serial.print(F(" v"));
     Serial.println(firmwareVersion());
     sendConfigLine();
-}
-
-static void sendTelemetry() {
-    Serial.print(F("T "));
-    Serial.println(mcuStateName(g_mcuState));
 }
 
 //=============================================================================
@@ -101,7 +95,6 @@ void serialPoll() {
             logInfo("SER", String(F("pending intake resent (age=")) + String(age) + F("ms)"));
         }
         s_lastHb = g_currentMillis;
-        s_lastTelemetry = g_currentMillis;
     }
     s_wasConnected = connected;
 
@@ -127,10 +120,5 @@ void serialPoll() {
         s_lastHb = g_currentMillis;
         Serial.print(F("HB "));
         Serial.println(g_currentMillis / 1000UL);
-    }
-
-    if (g_currentMillis - s_lastTelemetry >= TELEMETRY_INTERVAL_MS) {
-        s_lastTelemetry = g_currentMillis;
-        sendTelemetry();
     }
 }

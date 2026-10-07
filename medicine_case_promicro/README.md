@@ -42,9 +42,11 @@ USB シリアルで Mac daemon（`../meds-daemon/`）へ INTAKE を送る。
 |---|---|
 | `HELLO medcase <name> v<x.y.z>` | 接続確立時（再接続時も再送） |
 | `CONFIG name=<name> v=<x.y.z>` | HELLO 直後と GET:config への応答 |
-| `HB <uptime_s>` | 5秒ごとの心拍 |
-| `T <state>` | 1秒ごとのテレメトリ（state: IDLE/BLINK） |
+| `HB <uptime_s>` | 60秒ごとの心拍 |
 | `INTAKE <age_ms>` | 服薬押下。age_ms>0 は daemon 停止中押下の再送（受信時刻から差し引いて復元） |
+
+待機中は送信しない（v2.2）。コアの CDC が Serial.write 毎に TX LED をパルスするため、
+待機中の点滅を減らすには送信を減らすしかない → 心拍は60秒に1回だけ。
 
 ### host -> MCU
 
