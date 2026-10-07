@@ -29,7 +29,9 @@ USB シリアルで Mac daemon（`../meds-daemon/`）へ INTAKE を送る。
 
 - 30ms のチャタリング除去後の立ち下がり（押し込み確定）で1回だけ発火
 - 2秒以内の連打は二重記録防止で無視（daemon 側にも5秒 dedup あり）
-- 押すとオンボードLED（RX/TX）が約1.5秒点滅（ノンブロッキング・LED_BLINK_* 定数）
+- 押すとオンボードLED（RX/TX）が約1.5秒点滅（ノンブロッキング・LED_BLINK_* 定数）。
+  LED は active-low（RXLED0/TXLED0 が点灯）。実機で逆に見えたら
+  `medicine_case_promicro_switch.ino` の LED_ON/LED_OFF を入れ替える
 - daemon 未接続中の押下は保持され、再接続時に経過ミリ秒付きで1回だけ再送
 
 ## シリアルプロトコル（115200 baud・行ベーステキスト）
