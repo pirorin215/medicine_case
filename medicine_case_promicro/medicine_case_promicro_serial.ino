@@ -1,10 +1,10 @@
 /**
- * USB シリアル通信（BLE版 medicine_case_ble.ino の置き換え）
+ * USB シリアル通信
  *
  * 行ベースのテキストプロトコル。HELLO 直後に daemon が GET:config しなくても
- * CONFIG を送るので、daemon は接続するだけで設定を把握できる。
- * daemon 未接続中の検知は g_intakePending に保持し、再接続時に1回だけ
- * age_ms（検知からの経過ミリ秒）付きで再送する。daemon は受信時刻から
+ * CONFIG を送るので、daemon は接続するだけで名前とバージョンを把握できる。
+ * daemon 未接続中の押下は g_intakePending に保持し、再接続時に1回だけ
+ * age_ms（押下からの経過ミリ秒）付きで再送する。daemon は受信時刻から
  * age_ms を差し引いて元の時刻を復元する。
  */
 
@@ -20,11 +20,7 @@ static unsigned long s_lastTelemetry = 0;
 // 送信ヘルパ
 //=============================================================================
 static void sendConfigLine() {
-    Serial.print(F("CONFIG angle="));
-    Serial.print(g_cfg.angle, 1);
-    Serial.print(F(" cooldown="));
-    Serial.print(g_cfg.cooldownMs);
-    Serial.print(F(" name="));
+    Serial.print(F("CONFIG name="));
     Serial.print(g_cfg.name);
     Serial.print(F(" v="));
     Serial.println(firmwareVersion());
@@ -40,27 +36,20 @@ static void sendHello() {
 
 static void sendTelemetry() {
     Serial.print(F("T "));
-    Serial.print(g_currentPitch, 1);
-    Serial.print(' ');
-    Serial.print(g_currentRoll, 1);
-    Serial.print(' ');
-    Serial.println(detectionStateName(g_detectionState));
+    Serial.println(mcuStateName(g_mcuState));
 }
 
 //=============================================================================
-// INTAKE 送出（imu モジュールの検出時と再接続再送の両方から使う）
+// INTAKE 送出（スイッチ押下時と再接続再送の両方から使う）
 //=============================================================================
-void serialSendIntake(float maxChange) {
+void serialSendIntake() {
     if (Serial) {
-        Serial.print(F("INTAKE "));
-        Serial.print(maxChange, 1);
-        Serial.print(F(" 0"));
+        Serial.print(F("INTAKE 0"));
         Serial.println();
         g_intakePending = false;
     } else {
         // daemon 未接続: 保持して再接続時に再送
         g_intakePending = true;
-        g_intakePendingMax = maxChange;
         g_intakePendingAt = g_currentMillis;
         logInfo("SER", F("intake kept as pending (daemon offline)"));
     }
@@ -76,30 +65,6 @@ static void handleLine(char* line) {
     }
     if (strncmp(line, "GET:config", 10) == 0) {
         sendConfigLine();
-        return;
-    }
-    if (strncmp(line, "SET:angle:", 10) == 0) {
-        float v = atof(line + 10);
-        if (v >= 10.0f && v <= 180.0f) {
-            g_cfg.angle = v;
-            configSave();
-            Serial.print(F("OK:angle:"));
-            Serial.println(v, 1);
-        } else {
-            Serial.println(F("ERR:angle"));
-        }
-        return;
-    }
-    if (strncmp(line, "SET:cooldown:", 13) == 0) {
-        unsigned long v = strtoul(line + 13, NULL, 10);
-        if (v >= 1000UL && v <= 300000UL) {
-            g_cfg.cooldownMs = v;
-            configSave();
-            Serial.print(F("OK:cooldown:"));
-            Serial.println(v);
-        } else {
-            Serial.println(F("ERR:cooldown"));
-        }
         return;
     }
     if (strncmp(line, "SET:name:", 9) == 0) {
@@ -131,8 +96,6 @@ void serialPoll() {
         if (g_intakePending) {
             unsigned long age = millis() - g_intakePendingAt;
             Serial.print(F("INTAKE "));
-            Serial.print(g_intakePendingMax, 1);
-            Serial.print(' ');
             Serial.println(age);
             g_intakePending = false;
             logInfo("SER", String(F("pending intake resent (age=")) + String(age) + F("ms)"));

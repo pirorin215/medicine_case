@@ -13,14 +13,16 @@ medicine_case/
 ├── medicine_case/              # BLE版ファームウェア (XIAO BLE Sense・現行運用)
 │   ├── README.md               # ファームウェア概要
 │   └── PROTOCOL_SPEC.md        # BLE通信プロトコル仕様
-├── medicine_case_promicro/     # USB直結版ファームウェア (Pro Micro + GY-BMI160)
+├── medicine_case_promicro/     # USB直結版ファームウェア (Pro Micro + マイクロスイッチ)
 │   └── README.md               # 配線・シリアルプロトコル仕様
 ├── meds-daemon/                # Mac側 daemon (USBシリアル受信・記録・ntfy・リマインド)
 │   └── README.md               # 構成・セットアップ
 └── MedicineCaseMob/            # BLE版スマホアプリ (Android・USB版では不使用)
 ```
 
-USB直結版はスマホアプリの代わりにポータル `/meds/` が設定・履歴UIを担う
+USB直結版は「ボタンを押したら服薬した」方式（v2.1・2026-10-07）。旧傾き検知は
+半年の運用で「反応するように傾けている」状態になったため廃止（経緯は todo.md）。
+スマホアプリの代わりにポータル `/meds/` が設定・履歴UIを担う
 （データの正は `~/www-portal/data/meds/`）。詳細は todo.md と各 README を参照。
 
 ## システム概要

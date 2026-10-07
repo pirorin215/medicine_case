@@ -2,29 +2,32 @@
 #define MEDICINE_CASE_PROMICRO_H
 
 #include <Arduino.h>
-#include <Wire.h>
 #include <EEPROM.h>
 
 //=============================================================================
-// ファームウェアバージョン（コード変更時は PATCH を bump すること）
+// ファームウェアバージョン（コード変更時は PATCH を bump すること・機構変更は MINOR）
 //=============================================================================
 #define FIRMWARE_VERSION_MAJOR 2
-#define FIRMWARE_VERSION_MINOR 0
-#define FIRMWARE_VERSION_PATCH 1
+#define FIRMWARE_VERSION_MINOR 1
+#define FIRMWARE_VERSION_PATCH 0
 
 //=============================================================================
-// ハードウェア定数
+// マイクロスイッチ（服薬ボタン）
 //=============================================================================
-// GY-BMI160 モジュールの I2C アドレス（SDO -> GND で 0x68 / VCC で 0x69）
-#define IMU_I2C_ADDR 0x68
+// COM -> GND / NO -> D4 の1極接続。INPUT_PULLUP で押すと LOW。
+#define SWITCH_PIN 4
+#define SWITCH_DEBOUNCE_MS       30    // チャタリング除去 [ms]
+#define SWITCH_MIN_INTERVAL_MS   2000  // 連打による二重記録の防止 [ms]
 
 //=============================================================================
-// 検知定数（BLE版 medicine_case/medicine_case.h から移植・既定値は変えない）
+// オンボードLED点滅（押下フィードバック）
 //=============================================================================
-#define DEFAULT_MOVEMENT_THRESHOLD_DEG 70.0f  // 既定の検知角度 [deg]
-#define MOVEMENT_STABILITY_MS    500          // 動き収束待ち時間 [ms]
-#define SENSOR_UPDATE_INTERVAL_MS 100         // センサ更新間隔 [ms]
-#define DEFAULT_COOLDOWN_TIME_MS 30000UL      // 既定クールダウン [ms]
+// RX/TX LED は active-low: RXLED0/TXLED0 で点灯・RXLED1/TXLED1 で消灯。
+// なお TX LED は USB CDC が送信のたびに短くパルスするため、日常運用でも
+// テレメトリ(1秒毎)で微点滅する（押下時は RX LED も含めてはっきり点滅する）。
+#define LED_BLINK_ON_MS   150
+#define LED_BLINK_OFF_MS  100
+#define LED_BLINK_COUNT   6
 
 //=============================================================================
 // シリアル送出周期
@@ -33,41 +36,34 @@
 #define TELEMETRY_INTERVAL_MS  1000UL   // T（テレメトリ）送出周期
 
 //=============================================================================
-// 検知状態
+// MCU状態（テレメトリの state・BLINK は押下フィードバック点滅中）
 //=============================================================================
-enum DetectionState : uint8_t {
-    DETECTION_STATE_IDLE = 0,
-    DETECTION_STATE_MOVING = 1,
-    DETECTION_STATE_CONFIRMED = 2,
+enum McuState : uint8_t {
+    MCU_STATE_IDLE = 0,
+    MCU_STATE_BLINK = 1,
 };
 
 //=============================================================================
-// EEPROM 設定（32U4 の内蔵EEPROM。BLE版の InternalFileSystem 相当）
+// EEPROM 設定（名前のみ。しきい値はスイッチ化で不要になった）
 //=============================================================================
 struct DeviceConfig {
     uint32_t magic;
     uint16_t version;
-    float    angle;       // 検知角度 [deg]（範囲 10-180）
-    uint32_t cooldownMs;  // クールダウン [ms]（範囲 1000-300000）
     char     name[16];    // デバイス名（複数台識別用・SET:name で変更）
 };
 
 #define CONFIG_MAGIC   0x4D43504DUL  // "MCPM"
-#define CONFIG_VERSION 1
+#define CONFIG_VERSION 2
 
 //=============================================================================
 // グローバル変数
 //=============================================================================
 extern DeviceConfig g_cfg;
 extern unsigned long g_currentMillis;
-extern uint8_t g_detectionState;
-extern float g_currentPitch;
-extern float g_currentRoll;
-extern bool g_imuEnabled;
+extern uint8_t g_mcuState;
 
-// 未送信の検知（daemon 未接続中に検知した分・再接続時に1回だけ再送）
+// 未送信の検知（daemon 未接続中に押された分・再接続時に1回だけ再送）
 extern bool g_intakePending;
-extern float g_intakePendingMax;
 extern unsigned long g_intakePendingAt;
 
 //=============================================================================
@@ -77,16 +73,17 @@ extern unsigned long g_intakePendingAt;
 void configLoad();
 void configSave();
 const char* firmwareVersion();
-const char* detectionStateName(uint8_t s);
+const char* mcuStateName(uint8_t s);
 void logInfo(const char* tag, const String& msg);
 
-// medicine_case_promicro_imu.ino
-void setupIMU();
-void updateSensor();
-bool detectMedicineIntake();
+// medicine_case_promicro_switch.ino
+void setupSwitch();
+void pollSwitch();
+void updateBlink();
+void blinkStart();
 
 // medicine_case_promicro_serial.ino
 void serialPoll();
-void serialSendIntake(float maxChange);
+void serialSendIntake();
 
 #endif // MEDICINE_CASE_PROMICRO_H

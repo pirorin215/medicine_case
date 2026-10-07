@@ -38,6 +38,11 @@
 
 ## 移植元との対応
 
-- 検知ロジック・定数: `../medicine_case/medicine_case_sensor.ino` + `medicine_case.h`（値は勝手に変えない）
-- BMI160 ドライバ: `~/dev/Arduino/btclock/bikeclock_esp32/bikeclock_esp32_imu.ino`（CMD受理待ち・PMU完了待ちの罠と対策込み）
-- BLE 層は削除し、`medicine_case_promicro_serial.ino` の行ベーステキストプロトコルに置換。プロトコル仕様は README.md
+- v2.0 は GY-BMI160 傾き検知（bikeclock_esp32 のドライバ移植）だったが、
+  2026-10-07 に v2.1 マイクロスイッチ押下へ転換（半年の運用で「反応するように
+  傾けている」自覚・稀な不検知のため）。IMU には戻さないこと。
+- 検知は `medicine_case_promicro_switch.ino` に集約（30ms debounce・2秒最小間隔・
+  LED点滅フィードバック）。押下イベントの送信契約（INTAKE <age_ms>・pending再送）
+  は `medicine_case_promicro_serial.ino`。
+- LED は RXLED0/TXLED0 が点灯（active-low）。実機で逆に見えたら LED_ON/LED_OFF を入れ替える。
+- BLE 層は存在しない。プロトコル仕様は README.md。

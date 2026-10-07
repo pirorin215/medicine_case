@@ -33,7 +33,6 @@ DEFAULT_CONFIG = {
         {"name": "夜", "time": "22:00", "enabled": True},
     ],
     "remind": {"repeat_min": 30, "window_min": 120},
-    "device": {"angle": 70.0, "cooldown_ms": 30000},
 }
 
 # 枠開始の何分前までの服用をその枠に数えるか

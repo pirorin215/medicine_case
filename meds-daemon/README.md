@@ -1,8 +1,8 @@
 # meds-daemon
 
-Medicine Case Pro Micro（`../medicine_case_promicro/`）の USB シリアルを受ける
-Mac mini 常駐 daemon。旧BLE版で Android アプリ（MedicineCaseMob）が担っていた
-記録・通知・スケジュール管理を Mac 側に引き継ぐ。
+Medicine Case Pro Micro（`../medicine_case_promicro/`・マイクロスイッチ版）の
+USB シリアルを受ける Mac mini 常駐 daemon。旧BLE版で Android アプリ
+（MedicineCaseMob）が担っていた記録・通知・スケジュール管理を Mac 側に引き継ぐ。
 
 ## 構成
 
@@ -10,10 +10,12 @@ Mac mini 常駐 daemon。旧BLE版で Android アプリ（MedicineCaseMob）が�
 Pro Micro → USB シリアル → meds_daemon.py（常駐・yocron keepalive 配下）
                               ├─ history.jsonl 追記 + ntfy 即時通知（服用記録）
                               ├─ status.json 更新（デバイス状態・ポータルが読む）
-                              ├─ config.json の差分を SET:angle/cooldown でMCUへ反映
                               └─ 設定: setting.json（git管理外・exampleからコピー）
 meds_check.py（yocron every 5m）→ 飲み忘れを ntfy リマインド
 ```
+
+デバイスはスイッチ押下で `INTAKE <age_ms>` を送るだけ。しきい値設定は存在しない
+（config.json は枠・リマインド設定のみで daemon は読まない）。
 
 ## セットアップ
 
@@ -28,7 +30,7 @@ cp setting.json.example setting.json   # serial_port を実機のポートに（
 
 | ファイル | 正 | 内容 |
 |---|---|---|
-| config.json | ポータル api.php | slots（朝/昼/夜の時刻+有効）・remind・device（角度/クールダウン） |
+| config.json | ポータル api.php | slots（朝/昼/夜の時刻+有効）・remind（再通知/枠長） |
 | status.json | daemon | daemon 状態・デバイス online/角度/状態/最終心拍 |
 | history.jsonl | daemon | 服薬イベント追記ログ `{ts, iso, device, max_change, source}` |
 | remind-state.json | meds_check | 当日のリマインド送信履歴（二重通知防止） |

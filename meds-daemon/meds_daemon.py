@@ -5,12 +5,12 @@ meds_daemon — Medicine Case Pro Micro (USB シリアル) の受信・記録・
 yocron keepalive (alive_port) 配下で常駐し、死亡時は keepalive が respawn する。
 
 データ（単一真実は ~/www-portal/data/meds/ 配下・git管理外）:
-  config.json    スケジュール・しきい値の正（ポータル api.php が書く・daemon は読む）
+  config.json    スケジュールの正（ポータル api.php と meds_check.py が読む）
   status.json    デバイス/daemon の現在状態（ポータルが読む・daemon が書く）
   history.jsonl  服薬イベントの追記型ログ
 
-daemon は config.json の device セクションと MCU の実設定の差分を見て
-SET:angle / SET:cooldown を送るため、しきい値変更はポータルから行える。
+デバイスはマイクロスイッチ押下で INTAKE を送る（v2.1・しきい値設定なし）。
+config.json を daemon は読まない（MCU への設定反映も存在しない）。
 """
 
 import json
@@ -38,7 +38,6 @@ DEFAULT_CONFIG = {
         {"name": "夜", "time": "22:00", "enabled": True},
     ],
     "remind": {"repeat_min": 30, "window_min": 120},
-    "device": {"angle": 70.0, "cooldown_ms": 30000},
 }
 
 # HB/T がこの秒数途絶えたら接続を張り直す
@@ -120,10 +119,6 @@ class DeviceState:
     def __init__(self):
         self.name = None
         self.fw = None
-        self.angle = None
-        self.cooldown_ms = None
-        self.pitch = None
-        self.roll = None
         self.state = None
         self.last_seen = None
         self.last_intake_ts = None
@@ -138,11 +133,7 @@ class DeviceState:
             "connected": connected,
             "online": online,
             "last_seen": iso(self.last_seen) if self.last_seen else None,
-            "pitch": self.pitch,
-            "roll": self.roll,
             "state": self.state,
-            "angle": self.angle,
-            "cooldown_ms": self.cooldown_ms,
             "last_intake_ts": self.last_intake_ts,
             "serial_port": setting["serial_port"],
         }
@@ -158,19 +149,6 @@ def serve_alive(port):
         conn.close()
 
 
-def sync_device_config(cfg, dev, write_line):
-    """config.json の device 設定と MCU の差分を SET で反映"""
-    want = cfg.get("device", {})
-    if dev.angle is not None and want.get("angle") is not None and \
-            abs(float(want["angle"]) - dev.angle) > 0.05:
-        write_line("SET:angle:%s" % want["angle"])
-        log("SET:angle:%s 送信（MCU=%s）" % (want["angle"], dev.angle))
-    if dev.cooldown_ms is not None and want.get("cooldown_ms") is not None and \
-            int(want["cooldown_ms"]) != int(dev.cooldown_ms):
-        write_line("SET:cooldown:%s" % int(want["cooldown_ms"]))
-        log("SET:cooldown:%s 送信（MCU=%s）" % (want["cooldown_ms"], dev.cooldown_ms))
-
-
 def handle_line(line, setting, dev, write_line):
     parts = line.split()
     tag = parts[0] if parts else ""
@@ -184,40 +162,29 @@ def handle_line(line, setting, dev, write_line):
         log("接続:", line)
 
     elif tag == "CONFIG":
-        # CONFIG angle=70.0 cooldown=30000 name=medcase1 v=2.0.1
+        # CONFIG name=medcase1 v=2.1.0
         kv = dict(p.split("=", 1) for p in parts[1:] if "=" in p)
-        try:
-            dev.angle = float(kv.get("angle"))
-            dev.cooldown_ms = int(float(kv.get("cooldown")))
-        except (TypeError, ValueError):
-            pass
         dev.name = kv.get("name", dev.name)
         dev.fw = kv.get("v", dev.fw)
-        sync_device_config(load_config(), dev, write_line)
 
     elif tag == "HB":
         dev.last_seen = time.time()
 
     elif tag == "T":
         dev.last_seen = time.time()
-        try:
-            dev.pitch = float(parts[1])
-            dev.roll = float(parts[2])
-            dev.state = parts[3]
-        except (IndexError, ValueError):
-            pass
+        if len(parts) > 1:
+            dev.state = parts[1]
 
     elif tag == "INTAKE":
-        # INTAKE <maxChange> <age_ms>
+        # INTAKE <age_ms>
         dev.last_seen = time.time()
         try:
-            max_change = float(parts[1])
-            age_ms = int(parts[2])
+            age_ms = int(parts[1])
         except (IndexError, ValueError):
             return
         ts = time.time() - age_ms / 1000.0
 
-        # 軽い二重受信 insurance（同一max・5秒以内は無視）
+        # 軽い二重受信 insurance（5秒以内の重複は無視）
         if dev.last_intake_ts is not None and abs(ts - dev.last_intake_ts) < 5:
             return
         dev.last_intake_ts = ts
@@ -227,15 +194,14 @@ def handle_line(line, setting, dev, write_line):
             "ts": int(ts),
             "iso": iso(ts),
             "device": dev.name or "unknown",
-            "max_change": max_change,
-            "source": "serial",
+            "source": "switch",
         }
         append_history(entry)
         slot = slot_for_ts(cfg.get("slots", []), ts)
         slot_label = slot + "枠" if slot else ""
         title = "💊 服薬を記録 %s%s" % (
             datetime.fromtimestamp(ts).strftime("%H:%M"), ("・" + slot_label) if slot else "")
-        body = "%s (最大変化 %.1f°) %s" % (entry["device"], max_change, entry["iso"])
+        body = "%s ボタン操作 %s" % (entry["device"], entry["iso"])
         send_ntfy(setting, title, body)
         log("INTAKE記録:", entry)
 
@@ -254,7 +220,6 @@ def run_serial(setting, dev):
     log("ポートオープン:", port)
     buf = b""
     last_status_write = 0.0
-    last_config_mtime = None
 
     try:
         while True:
@@ -272,18 +237,6 @@ def run_serial(setting, dev):
             # リンク死活（HB/T が途絶えたら張り直し）
             if dev.last_seen is not None and now - dev.last_seen > LINK_STALE_SEC:
                 raise serial.SerialException("link stale (HB/T timeout)")
-
-            # config.json 変更検知 → MCU へ反映
-            try:
-                mtime = os.path.getmtime(CONFIG_PATH)
-                if last_config_mtime is not None and mtime != last_config_mtime:
-                    sync_device_config(load_config(), dev, lambda s: ser.write((s + "\n").encode()))
-                last_config_mtime = mtime
-            except FileNotFoundError:
-                pass
-
-            # オフライン監視（接続中に HB が止まったら…は上で張り直すので、
-            # ここでは「USB抜け等でポート自体が開けない」状況を呼び元が扱う）
 
             if now - last_status_write >= 5:
                 last_status_write = now

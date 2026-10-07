@@ -1,27 +1,36 @@
-# Medicine Case Pro Micro
+# Medicine Case Pro Micro（スイッチ版）
 
-Pro Micro (ATmega32U4) + GY-BMI160 による **USB直結版** スマート薬ケースファームウェア。
-旧BLE版（`../medicine_case/`・XIAO BLE Sense）の検知ロジックをそのまま移植し、
-BLE を USB シリアルに置き換えたもの。検知はすべて MCU 側で完結し、Mac の
-daemon（`../meds-daemon/`）がイベントを受けて記録・通知する。
+Pro Micro (ATmega32U4) + マイクロスイッチによる **USB直結版** 服薬記録デバイス。
+**ボタンを押したら「服薬した」**。押すとオンボードLEDが点滅して応答し、
+USB シリアルで Mac daemon（`../meds-daemon/`）へ INTAKE を送る。
+
+> 経緯: v2.0 は GY-BMI160 による傾き検知だったが、半年の運用で「反応するように
+> 傾けている」状態になり、稀な不検知もあったため 2026-10-07 にスイッチ押下へ転換（v2.1）。
+> 検知の確実さは押下が最強で、認知負荷も変わらないと判断。
 
 ## ハードウェア
 
 | 部品 | 内容 |
 |---|---|
 | マイコン | Pro Micro互換 (ATmega32U4・5V/16MHz) |
-| センサ | GY-BMI160 (6軸IMU・加速度のみ使用・ジャイロは未起動) |
+| ボタン | 瞬間マイクロリミットスイッチ（SPDT・手持ち MKBKLLJY系）またはタクトスイッチ |
 | 電源 | USB（Macポートから直接給電） |
 
-### 配線
+### 配線（2本だけ）
 
-| GY-BMI160 | Pro Micro | 備考 |
+| スイッチ | Pro Micro | 備考 |
 |---|---|---|
-| VCC | VCC (5V) | モジュール内蔵LDOで3.3Vを生成 |
-| GND | GND | |
-| SDA | D2 (SDA) | モジュール側プルアップ3.3V。AVRのVIH(0.6VCC=3.0V)に規格内で収まる |
-| SCL | D3 (SCL) | 同上 |
-| SDO | GND | I2Cアドレス 0x68（VCC接続なら0x69・`IMU_I2C_ADDR`を変更） |
+| COM（中央ピン） | GND | |
+| NO（a側ピン） | D4 | INPUT_PULLUP・押すと LOW。NC は未接続 |
+
+タクトスイッチの場合も同様に片脚→GND・他方→D4。
+
+## 検知仕様
+
+- 30ms のチャタリング除去後の立ち下がり（押し込み確定）で1回だけ発火
+- 2秒以内の連打は二重記録防止で無視（daemon 側にも5秒 dedup あり）
+- 押すとオンボードLED（RX/TX）が約1.5秒点滅（ノンブロッキング・LED_BLINK_* 定数）
+- daemon 未接続中の押下は保持され、再接続時に経過ミリ秒付きで1回だけ再送
 
 ## シリアルプロトコル（115200 baud・行ベーステキスト）
 
@@ -30,30 +39,20 @@ daemon（`../meds-daemon/`）がイベントを受けて記録・通知する。
 | 行 | 意味 |
 |---|---|
 | `HELLO medcase <name> v<x.y.z>` | 接続確立時（再接続時も再送） |
-| `CONFIG angle=<deg> cooldown=<ms> name=<name> v=<x.y.z>` | HELLO 直後と GET:config への応答 |
+| `CONFIG name=<name> v=<x.y.z>` | HELLO 直後と GET:config への応答 |
 | `HB <uptime_s>` | 5秒ごとの心拍 |
-| `T <pitch> <roll> <state>` | 1秒ごとのテレメトリ（state: IDLE/MOVING/CONFIRMED） |
-| `INTAKE <maxChange> <age_ms>` | 服薬検知。age_ms>0 は daemon 停止中検知の再送（受信時刻から差し引いて復元） |
+| `T <state>` | 1秒ごとのテレメトリ（state: IDLE/BLINK） |
+| `INTAKE <age_ms>` | 服薬押下。age_ms>0 は daemon 停止中押下の再送（受信時刻から差し引いて復元） |
 
 ### host -> MCU
 
-| コマンド | 応答 | 範囲 |
-|---|---|---|
-| `PING` | `PONG` | |
-| `GET:config` | `CONFIG ...` | |
-| `SET:angle:<deg>` | `OK:angle:<deg>` / `ERR:angle` | 10-180 |
-| `SET:cooldown:<ms>` | `OK:cooldown:<ms>` / `ERR:cooldown` | 1000-300000 |
-| `SET:name:<name>` | `OK:name:<name>` / `ERR:name` | 1-15文字 |
+| コマンド | 応答 |
+|---|---|
+| `PING` | `PONG` |
+| `GET:config` | `CONFIG ...` |
+| `SET:name:<name>` | `OK:name:<name>` / `ERR:name`（1-15文字） |
 
-設定変更は即EEPROMに保存され、電源断後も保持される。
-threshold/cooldown は daemon が `~/www-portal/data/meds/config.json` との差分を見て自動送信するため、通常は手動で打つ必要はない。
-
-## 検知仕様（BLE版から無変更移植）
-
-- pitch/roll を重力ベクトルから計算（100ms周期）し EMA 平滑（alpha=0.8）
-- 安定（2度未満の動きが1秒）したらベースラインを捕捉。別位置で安定し続けたら更新（ドリフト追従）
-- ベースラインからの変化量が角度しきい値（既定70°）を超えたら MOVING、500ms後に最大変化量で確定判定
-- 検出後はクールダウン（既定30秒）で連続検出を防止
+名前は EEPROM に保存される（複数台識別は Phase 2 で daemon・ポータルが扱う）。
 
 ## ビルド・書き込み
 
@@ -65,7 +64,6 @@ sh upload.sh                       # 書き込み（Caterina: リセット後8�
 ```
 
 - FQBN: `arduino:avr:leonardo`（Pro Micro 専用コア無しで Leonardo として扱う・promicro-presence と同じ）
-- 複数台の識別は `SET:name:<name>` で EEPROM に名前を焼いて行う（Phase 2 で daemon・ポータルが扱う）
 
 ## ライセンス
 
