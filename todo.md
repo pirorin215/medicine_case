@@ -1,8 +1,16 @@
 # medicine_case todo
 
-更新: 2026-10-07
+更新: 2026-10-08
 
 ## 残課題
+
+- [ ] daemon: ポート→デバイス名のレジストリ（daemon 設定に複数 Pro Micro の固定ポートを列挙・HELLO の名前と突合）
+- [ ] history/status をデバイス名単位に分離（history.jsonl には Phase 1 から device フィールド入りなので拡張は読み側）
+- [ ] ポータル: デバイス切替UI・台数分の状態表示・台帳的な名前管理
+
+## 保留
+
+## 完了済み
 
 ### Phase 1: Pro Micro 単体版の構築（USB直結・ボタン押下で記録）
 
@@ -10,9 +18,6 @@
 - [x] Mac daemon `meds-daemon/`（シリアル監視・再接続・status/history書込・ntfy・alive_port・デバイス無音検知）— status.json 連携は api 実測済み
 - [x] yocron ジョブ: `meds-daemon`（keepalive・alive_port 8477）＋ `meds-check`（every 5m 飲み忘れリマインド）— validate 合格・**ハード接続まで disabled マーカーで停止中**
 - [x] ポータル `/meds/` 新設（デバイス状態・今日の3枠・履歴・設定）＋ `~/www-portal/index.html` にカード追加 — api.php 応答実測済み
-- [ ] 実機配線（マイクロスイッチ: COM→GND / NO→D4 のみ・INPUT_PULLUP）と書き込み検証（開発ポート212101）。**接続時に `rm ~/.cache/yocron/disabled/meds-daemon ~/.cache/yocron/disabled/meds-check` でジョブ有効化**
-- [ ] E2E実証: 薬ケース実機で旧BLE版と並行運用→安定後、XIAO BLE Sense を取り外して fastrec 予備へ
-- [ ] `/parts/` で Pro Micro −1 の消費記録（スイッチはタクト/リミットスイッチの手持ちから・消したら記録）
 - [x] **移設完了: `/dev/cu.usbmodem212401`（2026-10-07・ユーザーが移設・setting.sh更新済み）** — daemon setting.json 更新＋再起動でオンライン確認済み・§8 表へ「常用固定・実験流用書込禁止」で登録済み。自プロジェクトの upload.sh は自ポートへの書込が正当なので common.sh blocklist には入れない（他プロジェクトは §8 宣言で守る）
 
 ### Phase 2: 同一デバイス複数スイッチ対応（2026-10-07 ユーザー提案・同日実装）
@@ -20,18 +25,9 @@
 - [x] ファーム v2.3: SWITCH_PINS = {D4, D5, D6, D7, D8, D9}（最大6本・INPUT_PULLUP・GND共有）・`INTAKE <idx> <age_ms>`・押下LED点滅は全スイッチ共通（ビルド合格）
 - [x] daemon: dedup をスイッチ単位に変更・スイッチ名は config.json の `switches: {idx: 名前}` で Mac 側管理（EEPROM に焼かない＝名前変更にファーム不要）・v2.2 互換（`INTAKE <age>` は idx=0 扱い）
 - [x] ポータル: 設定にスイッチ名一覧（D4-D9→名前）を追加・history/ntfy に switch_name を反映
-- [ ] **v2.3 を実機へ書き込む**（`sh upload.sh`・setting.sh は 212401 済み）→ D5/D6 押下で ntfy・履歴を確認
-- [ ] スイッチ名の初期値は「スイッチ1/2/3」— ポータル⚙設定で好きな名前に変える
 - [x] スケジュールをスマホアプリ準拠に（2026-10-07）: 枠=開始/終了(連動)＋推奨時刻3つ(有効枠内のみ・1日1回)＋守りは直近枠ルール＋追い通知60分間隔。帰属は時刻ベース（旧GRACE吸収は廃止）。MEDS_FAKE_TIME で攻め/守り/dedup/日替わりをテスト済み。BLE接続時のチャンス通知のみ非移植
-- [ ] 薬別スケジュール（スイッチごとの枠enabled選択等）は将来候補として保留 — 薬ごとに時刻が違うニーズが出てから設計する
+
 - メリット: 用途が増えても USB 1ポートで済む → ポート追加も複数台化（Phase 3）も当面不要になる
-
-### Phase 3: 複数台対応（複数USBデバイス・必要性は Phase 2 で消える可能性大）
-
-- [ ] daemon: ポート→デバイス名のレジストリ（daemon 設定に複数 Pro Micro の固定ポートを列挙・HELLO の名前と突合）
-- [ ] history/status をデバイス名単位に分離（history.jsonl には Phase 1 から device フィールド入りなので拡張は読み側）
-- [ ] ポータル: デバイス切替UI・台数分の状態表示・台帳的な名前管理
-- [ ] 台数分の §8 シリアルポート対応表登録
 
 ## 概要
 
