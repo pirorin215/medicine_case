@@ -15,8 +15,10 @@ config.json を daemon は読まない（MCU への設定反映も存在しな�
 
 import json
 import os
+import signal
 import socket
 import subprocess
+import sys
 import threading
 import time
 from datetime import datetime
@@ -268,6 +270,10 @@ DAEMON_STARTED = iso()
 
 def main():
     setting = load_setting()
+    # SIGTERM（yocron timeout 到達・手動 stop）でも run_serial の finally を
+    # 通らせ、status.json を connected=false にして終わる（デフォルトハンドラは
+    # finally をスキップして「接続中」のまま残留する）
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     os.makedirs(DATA_DIR, exist_ok=True)
     # history.jsonl 無ければ作る
     if not os.path.exists(HISTORY_PATH):
@@ -284,7 +290,7 @@ def main():
             log("serial:", e, "→ 5秒後に再接続")
             write_status(setting, dev, connected=False)
             time.sleep(5)
-        except KeyboardInterrupt:
+        except (KeyboardInterrupt, SystemExit):
             break
 
 

@@ -4,6 +4,7 @@
 
 ## 残課題
 
+- [ ] ファーム v2.3.1 を実機へ書き込み（2026-10-08 リスクスキャン対処・ビルド合格済み。書込は `sh upload.sh` — daemon がポート占有中のため、書込前に `~/.cache/yocron/disabled/meds-daemon` を作って daemon を停止し、書込後にマーカー削除して keepalive 再起動が確実）
 - [ ] daemon: ポート→デバイス名のレジストリ（daemon 設定に複数 Pro Micro の固定ポートを列挙・HELLO の名前と突合）
 - [ ] history/status をデバイス名単位に分離（history.jsonl には Phase 1 から device フィールド入りなので拡張は読み側）
 - [ ] ポータル: デバイス切替UI・台数分の状態表示・台帳的な名前管理
@@ -11,6 +12,13 @@
 ## 保留
 
 ## 完了済み
+
+### リスクスキャン対処（2026-10-08 朝スキャンの指摘）
+
+- [x] ファーム v2.3.1: 未送信押下をスイッチ単位保持に — daemon 未接続中の複数押下で pending 単数スロットが上書きされ古い分が消失する問題（スキャン #1・中）。別スイッチは全て残る・同一スイッチ複数回は初回時刻で束ねる。ビルド合格 Flash 36%/RAM 16%
+- [x] daemon: SIGTERM ハンドラ追加 — yocron timeout(24h)・手動 stop で finally がスキップされ status.json が connected=true のまま残留する問題（スキャン #2・低）。SIGTERM→sys.exit(0) で run_serial の finally を通る
+- [x] meds_check: config 形状ガイドを全枠 start/end 必須に — 先頭だけ新形式だと 5 分毎に KeyError でリマインド job が失敗し続ける問題（スキャン #3・低）。単体テスト 4 ケース PASS
+- [x] ポータル api.php（~/www/meds）: save_json の tmp をプロセス単位ユニークに・書込失敗検知（スキャン #4・低）
 
 ### Phase 1: Pro Micro 単体版の構築（USB直結・ボタン押下で記録）
 

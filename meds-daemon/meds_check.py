@@ -66,9 +66,13 @@ def load_config():
     for k in merged:
         if k in user:
             merged[k] = user[k]
-    # 形状ガイド（旧形式・配置ミスで daemon/check が死なないように）
+    # 形状ガイド（旧形式・配置ミスで daemon/check が死なないように）。
+    # 全要素が start/end を持つことを要求する — 先頭だけ新形式で後続が旧形式
+    # （time のみ）だと slot_of の s["start"] 参照で 5 分毎に KeyError で
+    # クラッシュし続けるため、1 つでも欠けたら全体を DEFAULT へ戻す
     if not isinstance(merged["slots"], list) or not merged["slots"] or \
-            "start" not in (merged["slots"][0] or {}):
+            any(not isinstance(s, dict) or "start" not in s or "end" not in s
+                for s in merged["slots"]):
         merged["slots"] = json.loads(json.dumps(DEFAULT_CONFIG["slots"]))
     if not isinstance(merged.get("recommend"), list):
         merged["recommend"] = list(DEFAULT_CONFIG["recommend"])
