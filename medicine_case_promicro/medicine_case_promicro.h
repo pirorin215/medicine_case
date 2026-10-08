@@ -9,7 +9,7 @@
 //=============================================================================
 #define FIRMWARE_VERSION_MAJOR 2
 #define FIRMWARE_VERSION_MINOR 3
-#define FIRMWARE_VERSION_PATCH 0
+#define FIRMWARE_VERSION_PATCH 1
 
 //=============================================================================
 // マイクロスイッチ（服薬ボタン・複数対応）
@@ -57,10 +57,12 @@ struct DeviceConfig {
 extern DeviceConfig g_cfg;
 extern unsigned long g_currentMillis;
 
-// 未送信の検知（daemon 未接続中に押された分・再接続時に1回だけ再送）
-extern bool g_intakePending;
-extern uint8_t g_intakePendingIdx;
-extern unsigned long g_intakePendingAt;
+// 未送信の検知（daemon 未接続中に押された分・再接続時に再送）。
+// スイッチ単位で保持する（v2.3.1: 旧単数スロットは未接続中の複数押下で
+// 古い分を上書き消失していた。別スイッチの押下は全て残る・同一スイッチの
+// 複数回は初回時刻を優先し1件に束ねる）
+extern bool g_intakePending[SWITCH_COUNT];
+extern unsigned long g_intakePendingAt[SWITCH_COUNT];
 
 //=============================================================================
 // プロトタイプ宣言

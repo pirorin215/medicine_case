@@ -3,9 +3,10 @@
  *
  * 行ベースのテキストプロトコル。HELLO 直後に daemon が GET:config しなくても
  * CONFIG を送るので、daemon は接続するだけで名前とバージョンを把握できる。
- * daemon 未接続中の押下は g_intakePending に保持し、再接続時に1回だけ
+ * daemon 未接続中の押下はスイッチ単位の g_intakePending[] に保持し、再接続時に
  * age_ms（押下からの経過ミリ秒）付きで再送する。daemon は受信時刻から
- * age_ms を差し引いて元の時刻を復元する。
+ * age_ms を差し引いて元の時刻を復元する。同一スイッチの複数回は初回時刻を
+ * 優先して 1 件に束ねる（別スイッチの押下は全て残る）。
  */
 
 #include "medicine_case_promicro.h"
@@ -42,12 +43,12 @@ void serialSendIntake(uint8_t idx) {
         Serial.print(idx);
         Serial.print(F(" 0"));
         Serial.println();
-        g_intakePending = false;
+        g_intakePending[idx] = false;
     } else {
-        // daemon 未接続: 保持して再接続時に再送
-        g_intakePending = true;
-        g_intakePendingIdx = idx;
-        g_intakePendingAt = g_currentMillis;
+        // daemon 未接続: 保持して再接続時に再送（スイッチ単位・同一スイッチの
+        // 複数回は初回時刻を優先して 1 件に束ねる）
+        g_intakePending[idx] = true;
+        g_intakePendingAt[idx] = g_currentMillis;
         logInfo("SER", F("intake kept as pending (daemon offline)"));
     }
 }
@@ -90,14 +91,15 @@ void serialPoll() {
     // 接続確立（初回・daemon 再起動・USB 再挿入のいずれも）
     if (connected && !s_wasConnected) {
         sendHello();
-        if (g_intakePending) {
-            unsigned long age = millis() - g_intakePendingAt;
+        for (uint8_t i = 0; i < SWITCH_COUNT; i++) {
+            if (!g_intakePending[i]) continue;
+            unsigned long age = millis() - g_intakePendingAt[i];
             Serial.print(F("INTAKE "));
-            Serial.print(g_intakePendingIdx);
+            Serial.print(i);
             Serial.print(' ');
             Serial.println(age);
-            g_intakePending = false;
-            logInfo("SER", String(F("pending intake resent (idx=")) + g_intakePendingIdx +
+            g_intakePending[i] = false;
+            logInfo("SER", String(F("pending intake resent (idx=")) + i +
                     F(" age=") + String(age) + F("ms)"));
         }
         s_lastHb = g_currentMillis;

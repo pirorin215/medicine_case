@@ -33,9 +33,8 @@
 DeviceConfig g_cfg;
 unsigned long g_currentMillis = 0;
 
-bool g_intakePending = false;
-uint8_t g_intakePendingIdx = 0;
-unsigned long g_intakePendingAt = 0;
+bool g_intakePending[SWITCH_COUNT] = {false};
+unsigned long g_intakePendingAt[SWITCH_COUNT] = {0};
 
 //=============================================================================
 // 設定（EEPROM）
