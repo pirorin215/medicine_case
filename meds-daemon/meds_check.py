@@ -143,7 +143,7 @@ def slot_taken_ts(intakes, s, today):
 
 
 def main():
-    setting = load_json(SETTING_PATH, {"ntfy_url": "https://ntfy.sh/claude-code-notice215"})
+    setting = load_json(SETTING_PATH, {"ntfy_url": "http://192.168.0.221:25880/claude-code-notice215"})
     cfg = load_config()
     n = now()
     today = n.date()
