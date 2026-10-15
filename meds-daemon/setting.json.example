@@ -1,6 +1,6 @@
 {
   "serial_port": "/dev/cu.usbmodem212101",
   "alive_port": 8477,
-  "ntfy_url": "https://ntfy.sh/claude-code-notice215",
+  "ntfy_url": "http://192.168.0.221:25880/claude-code-notice215",
   "device_offline_alert_sec": 300
 }
